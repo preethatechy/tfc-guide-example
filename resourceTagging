@@ -1,0 +1,39 @@
+def autoTagging(config) {
+    def path = pwd(), commiter_ID = pipelineUtil.get_nbkid(config)
+    println("NBK_ID of user who triggered the build: ${commiter_ID}")
+    config.commiterId = "${commiter_ID}"
+
+    ["tfvars", "tf"].each { ex ->
+        findFiles(glob: "**/*.${ex}").each { file ->
+            def filePath = "${path}/${file}", fileContents = pipelineUtil.script.readFile(filePath)
+
+            if (file.name.endsWith(".tfvars")) {
+                updateFile(fileContents, /(?s)(?i)tags.*?=.*?}/, commiter_ID, filePath)
+            } else if (fileContents.contains("module") || fileContents.contains("resource")) {
+                handleMainFile(fileContents, commiter_ID, filePath)
+            } else if (fileContents.contains("variable")) {
+                updateFile(fileContents, /(?s)(?i)default.*?=.*?}/, commiter_ID, filePath)
+            }
+        }
+    }
+}
+
+def updateFile(fileContents, regex, commiter_ID, filePath) {
+    writeFile(file: filePath, text: fileContents.replaceAll(regex) {
+        "merge(${removeCreatorID(it[1]?.trim())}, { CreatorID = \"${commiter_ID}\" })"
+    }, encoding: pipelineConstants.msBuildPipelineConstants.DEFAULT_WEBCONFIG_ENCODING)
+}
+
+def handleMainFile(fileContents, commiter_ID, filePath) {
+    def varList = fileContents.findAll(/(?i)(var\.tags)/).unique()
+    varList.each { fileContents = fileContents.replace(it, "merge(${it}, { CreatorID = \"${commiter_ID}\" })") }
+    if (varList.isEmpty() || varList.size() < fileContents.findAll(/(module|resource)/).size()) {
+        updateFile(fileContents, /(?s)(?i)tags.*?=.*?}/, commiter_ID, filePath)
+    } else {
+        writeFile(file: filePath, text: fileContents, encoding: pipelineConstants.msBuildPipelineConstants.DEFAULT_WEBCONFIG_ENCODING)
+    }
+}
+
+def removeCreatorID(block) {
+    block?.replaceAll(/CreatorID.*?,?/, "").replaceAll(/,?\s*}/, "}")
+}
