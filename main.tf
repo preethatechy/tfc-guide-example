@@ -1,6 +1,31 @@
 # Copyright (c) HashiCorp, Inc.
 # SPDX-License-Identifier: MPL-2.0
 
+def validatePhaseConfig(config) {
+    def validPhases = ["DEV", "LLE", "PROD"]
+
+    // Ensure both `phase` and `tfeOrganization` are provided
+    if (!config.phase || !validPhases.contains(config.phase.toUpperCase())) {
+        error "Invalid or missing phase: ${config.phase}. Use [DEV, LLE, PROD]."
+    }
+
+    if (!config.tfeOrganization) {
+        error "TFE Organization is not specified in the configuration."
+    }
+
+    // Check if the organization name matches the phase
+    def phaseOrgMap = ["DEV": "DEV", "LLE": "UAT", "PROD": "PROD"]
+    def validOrg = config.tfeOrganization.toUpperCase().contains(phaseOrgMap[config.phase.toUpperCase()] ?: "PROD")
+
+    if (!validOrg) {
+        printErrLog("Invalid environment/phase combination for ${config.phase}.")
+    }
+
+    return validOrg
+}
+
+
+
 provider "aws" {
   region = var.region
 }
