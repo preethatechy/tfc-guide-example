@@ -139,4 +139,86 @@ def logMetrics(config, message, success = true) {
     )
 }
 
+import groovy.json.JsonSlurper
+
+// Centralized error messages for each method
+def errorMessages = [
+    "validateOrgAndProvider" : "Verify whether you have specified correct TFE org, provider, or Token details",
+    "getWorkspaceId" : "Verify whether you have specified the correct workspace name",
+    "buildConfigurationStage" : "Exception occurred while building configuration stage",
+    "publishConfigurationStage" : "Exception/Error: Publishing config files failed"
+]
+
+// Reusable HTTP Request function with error handling
+def httpRequestHelper(config, method, url, body = null, file = null, contentType = "application/vnd.api+json", methodName = "") {
+    def headers = [
+        [name: "Authorization", value: "Bearer ${config.tfetoken}"],
+        [name: "Content-Type", value: contentType]
+    ]
+    try {
+        def response = httpRequest(
+            customHeaders: headers,
+            httpMode: method,
+            requestBody: body,
+            uploadFile: file,
+            wrapAsMultipart: file ? false : null,
+            url: url
+        )
+        return response.content ? new JsonSlurper().parseText(response.content) : null
+    } catch (Exception e) {
+        def errMsg = errorMessages[methodName] ?: "Unknown error"
+        printErrLog("${errMsg}: ${e.toString()}")
+        throw e
+    }
+}
+
+// Method to validate Org and Provider
+def validateOrgAndProvider(config) {
+    def url = "${config.tfeurl}/api/v2/organizations/${config.tfeorganization}/registry-providers/private/${config.tfeorganization}/${config.provider}"
+    httpRequestHelper(config, 'GET', url, null, null, "application/vnd.api+json", "validateOrgAndProvider")
+}
+
+// Method to get Workspace ID
+def getWorkspaceId(config) {
+    validateOrgAndProvider(config)  // Ensure Org and Provider are validated first
+    def url = "${config.tfeurl}/api/v2/organizations/${config.tfeorganization}/workspaces/${config.tfeworkspace}"
+    return httpRequestHelper(config, 'GET', url, null, null, "application/vnd.api+json", "getWorkspaceId").data.id
+}
+
+// Method to build Configuration Stage
+def buildConfigurationStage(config) {
+    def workspaceId = getWorkspaceId(config)  // Get workspace ID
+    def url = "${config.tfeurl}/api/v2/workspaces/${workspaceId}/configuration-versions"
+    def payload = '{"data":{"type":"configuration-versions","attributes":{"auto-queue-runs":false}}}'
+    return httpRequestHelper(config, 'POST', url, payload, null, "application/vnd.api+json", "buildConfigurationStage").data.attributes.'upload-url'
+}
+
+// Method to publish Configuration Stage
+def publishConfigurationStage(config) {
+    try {
+        def url = buildConfigurationStage(config)  // Get the upload URL
+        httpRequestHelper(config, 'PUT', url, null, "${config.repo}.${config.env}.tar.gz", "application/octet-stream", "publishConfigurationStage")
+        logMetrics(config, "Config files successfully published")
+    } catch (Exception e) {
+        logMetrics(config, "Config file publish stage failed: ${e}", false)
+        printErrLog("Exception/Error: Publishing config files failed - ${e}")
+    }
+}
+
+// Logging metrics for pipeline
+def logMetrics(config, message, success = true) {
+    pipelineUtil.logMetrics(
+        config,
+        pipelineConstants.stages.PUBLISHCONFIGFILES,
+        config.stageTool,
+        message,
+        null,
+        success ? pipelineConstants.stageResults.success : pipelineConstants.stageResults.failure
+    )
+}
+
+// Helper function for logging error messages
+def printErrLog(message) {
+    println "[ERROR] ${message}"
+}
 
