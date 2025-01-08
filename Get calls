@@ -55,3 +55,76 @@ def buildConfigurationStage(config) {
 def logMetrics(config, message) {
     pipelineUtil.logMetrics(config, pipelineConstants.stages.PUBLISHCONFIGFILES, config.stageTool, message, null, pipelineConstants.stageResults.success)
 }
+
+
+
+
+
+
+
+import groovy.json.JsonSlurper
+
+def httpRequestHelper(config, method, url, headers = [], body = null, file = null) {
+    try {
+        def response = httpRequest(
+            customHeaders: headers,
+            httpMode: method,
+            requestBody: body,
+            uploadFile: file,
+            wrapAsMultipart: file ? false : null,
+            url: url
+        )
+        return response.content ? new JsonSlurper().parseText(response.content) : null
+    } catch (Exception e) {
+        printErrLog("${e.toString().contains('404') ? 'Resource not found' : 'Request failed'}: ${url}")
+        throw e
+    }
+}
+
+def getHeaders(config, contentType = "application/vnd.api+json") {
+    return [
+        [name: "Authorization", value: "Bearer ${config.tfetoken}"],
+        [name: "Content-Type", value: contentType]
+    ]
+}
+
+def getWorkspaceId(config) {
+    validateOrgAndProvider(config)
+    def url = "${config.tfeurl}/api/v2/organizations/${config.tfeorganization}/workspaces/${config.tfeworkspace}"
+    return httpRequestHelper(config, 'GET', url, getHeaders(config)).data.id
+}
+
+def publishConfigurationStage(config) {
+    try {
+        def url = buildConfigurationStage(config)
+        httpRequestHelper(config, 'PUT', url, getHeaders(config, "application/octet-stream"), null, "${config.repo}.${config.env}.tar.gz")
+        logMetrics(config, "Config files successfully published")
+    } catch (Exception e) {
+        logMetrics(config, "Config file publish stage failed: ${e}", false)
+        printErrLog("Exception/Error: Publishing config files failed - ${e}")
+    }
+}
+
+def validateOrgAndProvider(config) {
+    def url = "${config.tfeurl}/api/v2/organizations/${config.tfeorganization}/registry-providers/private/${config.tfeorganization}/${config.provider}"
+    httpRequestHelper(config, 'GET', url, getHeaders(config))
+}
+
+def buildConfigurationStage(config) {
+    def url = "${config.tfeurl}/api/v2/workspaces/${getWorkspaceId(config)}/configuration-versions"
+    def payload = '{"data":{"type":"configuration-versions","attributes":{"auto-queue-runs":false}}}'
+    return httpRequestHelper(config, 'POST', url, getHeaders(config), payload).data.attributes.'upload-url'
+}
+
+def logMetrics(config, message, success = true) {
+    pipelineUtil.logMetrics(
+        config,
+        pipelineConstants.stages.PUBLISHCONFIGFILES,
+        config.stageTool,
+        message,
+        null,
+        success ? pipelineConstants.stageResults.success : pipelineConstants.stageResults.failure
+    )
+}
+
+
