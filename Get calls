@@ -104,11 +104,23 @@ def publishConfigurationStage(config) {
         printErrLog("Exception/Error: Publishing config files failed - ${e}")
     }
 }
-
 def validateOrgAndProvider(config) {
     def url = "${config.tfeurl}/api/v2/organizations/${config.tfeorganization}/registry-providers/private/${config.tfeorganization}/${config.provider}"
-    httpRequestHelper(config, 'GET', url, getHeaders(config))
+    try {
+        httpRequestHelper(config, 'GET', url, getHeaders(config))
+        printLog("Organization and provider validated successfully")
+    } catch (IllegalStateException err) {
+        if (err.toString().contains("Fail: Status code 404 is not in the accepted range")) {
+            printErrLog("Verify whether you have specified correct TFE org, provider, or Token details")
+        }
+        throw err
+    } catch (Exception e) {
+        printErrLog("Exception occurred: ${e.toString()}")
+        throw e
+    }
 }
+
+
 
 def buildConfigurationStage(config) {
     def url = "${config.tfeurl}/api/v2/workspaces/${getWorkspaceId(config)}/configuration-versions"
