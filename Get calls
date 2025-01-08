@@ -30,10 +30,15 @@ def getWorkspaceId(config) {
     return httpRequestHelper(config, 'GET', url, getHeaders(config)).data.id
 }
 
-def publishConfigurationStage(config) {
-    def url = buildConfigurationStage(config)
-    httpRequestHelper(config, 'PUT', url, getHeaders(config, "application/octet-stream"), null, "${config.repo}.${config.env}.tar.gz")
-    logMetrics(config, "Config files successfully published")
+def def publishConfigurationStage(config) {
+    try {
+        def url = buildConfigurationStage(config)
+        httpRequestHelper(config, 'PUT', url, getHeaders(config, "application/octet-stream"), null, "${config.repo}.${config.env}.tar.gz")
+        logMetrics(config, "Config files successfully published")
+    } catch (Exception e) {
+        logMetrics(config, "Config file publish stage failed: ${e}", false)
+        printErrLog("Exception/Error: Publishing config files failed - ${e}")
+    }
 }
 
 def validateOrgAndProvider(config) {
