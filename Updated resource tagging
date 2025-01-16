@@ -1,0 +1,47 @@
+def autoTagging(config) {
+    def path = pwd(), commiter_ID = pipelineUtil.get_nbkid(config)
+    println("NBK_ID of user who triggered the build: ${commiter_ID}")
+    config.commiterId = "${commiter_ID}"
+
+    [".tfvars", ".tf"].each { ext ->
+        findFiles(glob: "**/*${ext}").each { file ->
+            def filePath = "${path}/${file}", fileContents = pipelineUtil.script.readFile(filePath)
+
+            if (file.name.endsWith(".tfvars")) {
+                updateFile(fileContents, /(?s)(?i)tags\\s*=\\s*{.*?}/, commiter_ID, filePath)
+            } else if (fileContents.contains("module") || fileContents.contains("resource")) {
+                handleMainFile(fileContents, commiter_ID, filePath)
+            } else if (fileContents.contains("variable")) {
+                // Handle variable files explicitly to prevent issues
+                updateFile(fileContents, /(?s)(?i)default\\s*=\\s*{.*?}/, commiter_ID, filePath)
+            }
+        }
+    }
+}
+
+def updateFile(fileContents, regex, commiter_ID, filePath) {
+    writeFile(file: filePath, text: fileContents.replaceAll(regex) { match ->
+        def block = match[0]
+        block = removeCreatorID(block)
+        block.startsWith("{") ? "merge(${block}, { CreatorID = \\\"${commiter_ID}\\\" })" : block
+    }, encoding: pipelineConstants.msBuildPipelineConstants.DEFAULT_WEBCONFIG_ENCODING)
+}
+
+def handleMainFile(fileContents, commiter_ID, filePath) {
+    def varTags = fileContents.findAll(/(?i)(var\\.tags)/).unique()
+    varTags.each {
+        fileContents = fileContents.replace(it, "merge(${it}, { CreatorID = \\\"${commiter_ID}\\\" })")
+    }
+
+    if (varTags.isEmpty() || varTags.size() < fileContents.findAll(/(module|resource)/).size()) {
+        updateFile(fileContents, /(?s)(?i)tags\\s*=\\s*{.*?}/, commiter_ID, filePath)
+    } else {
+        writeFile(file: filePath, text: fileContents, encoding: pipelineConstants.msBuildPipelineConstants.DEFAULT_WEBCONFIG_ENCODING)
+    }
+}
+
+def removeCreatorID(block) {
+    return block?.replaceAll(/CreatorID.*?,?/, "") // Remove existing CreatorID
+                ?.replaceAll(/,?\\s*}/, "}")       // Properly close the block
+                ?.replaceAll(/[“”]/, "\"")         // Replace typographical quotes
+}
