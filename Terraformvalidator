@@ -1,0 +1,51 @@
+class TerraformValidator extends BaseValidator {
+    def TerraformRules = [
+        // General rules
+        ait                     : [type: 'string', defaultValue: null, mandatory: true, description: PD.ait],
+        cleanWorkspace          : [type: 'boolean', defaultValue: true, mandatory: false, setDefault: true, description: PD.cleanWorkspace],
+        debug                   : [type: 'boolean', defaultValue: false, mandatory: false, description: PD.debug],
+        help                    : [type: 'boolean', defaultValue: true, mandatory: false, setDefault: true, description: PD.help],
+        unitTest_enable         : [type: 'stageBoolean', defaultValue: false, mandatory: false, description: PD.unitTest_enable],
+        unitTest_failFast       : [type: 'boolean', defaultValue: false, mandatory: false, setDefault: true, description: PD.unitTest_failFast],
+        provider                : [type: 'string', mandatory: true, setDefault: true, description: PD.build_toolName],
+        disableDGValidation     : [type: 'boolean', defaultValue: false, mandatory: false, description: PD.disableDGValidation],
+
+        // Infrastructure execution
+        executeCreateInfrastructure: [type: 'boolean', defaultValue: false, mandatory: false, description: PD.executeCreateInfrastructure],
+        executeDestroyInfrastructure: [type: 'boolean', defaultValue: false, mandatory: false, description: PD.executeDestroyInfrastructure]
+    ]
+
+    @Override
+    def onGetPipelineSpecificRules() {
+        return TerraformRules
+    }
+
+    @Override
+    def onGetPipelineSpecificStages() {
+        return [
+            Stages.SCM,
+            Stages.ESPSECURITY_SCAN,
+            Stages.CHECKMARX_SCAN,
+            Stages.PREBUILD,
+            Stages.BUILD,
+            Stages.POSTBUILD,
+            Stages.UNITTEST,
+            Stages.PACKAGE,
+            Stages.ARTIFACT,
+            Stages.COMPLIANCE_SCAN,
+            Stages.TRIGGER_DEPENDENT_JOBS,
+            Stages.SCAN,
+            Stages.OPENSHIFT_BUILD,
+            Stages.OPENSHIFT_SCAN,
+            Stages.DEPLOY
+        ]
+    }
+
+    def getDefaultAgent(fieldName, rules) {
+        if (rules.build_toolName.paramValue.startsWith(C.TOOLNAME_WINDOWS_PREFIX)) {
+            return configHelper.getConfiguration(C.DEFAULT_WINDOWS_MAVEN_AGENT)
+        } else {
+            return configHelper.getConfiguration(C.DEFAULT_LINUX_MAVEN_AGENT)
+        }
+    }
+}
