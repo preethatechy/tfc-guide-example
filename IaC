@@ -407,3 +407,33 @@ def logMetrics(config, message, success = true) {
         success ? pipelineConstants.stageResults.success : pipelineConstants.stageResults.failure
     )
 }
+
+
+
+
+// Logging metrics for pipeline
+def logMetrics(config, message, success = true) {
+    pipelineUtil.logMetrics(
+        pipelineConstants.stages.PUBLISHCONFIGFILES,
+        config.stageTool,
+        message,
+        null,
+        success ? pipelineConstants.stagesResults.success : pipelineConstants.stagesResults.failure
+    )
+}
+
+
+// Sonar Scan Stage
+def sonarScanStage(config) {
+    printLog("Stage - Sonar Scan", true)
+    // Passing binariesPath as null because it is not required in non-compiled pipelines
+    sonarPlugin(null, config, "")
+}
+
+def executeCustomCommand(command) {
+    if (isUnix()) {
+        pipelineUtil.executeCommand("${command}", true)
+    } else {
+        pipelineUtil.executeCommand("${command}", false)
+    }
+}
