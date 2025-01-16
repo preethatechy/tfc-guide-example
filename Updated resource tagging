@@ -3,28 +3,34 @@ def autoTagging(config) {
     println("NBK_ID of user who triggered the build: ${commiter_ID}")
     config.commiterId = "${commiter_ID}"
 
+    // Process all .tfvars and .tf files
     [".tfvars", ".tf"].each { ext ->
         findFiles(glob: "**/*${ext}").each { file ->
             def filePath = "${path}/${file}", fileContents = pipelineUtil.script.readFile(filePath)
 
             if (file.name.endsWith(".tfvars")) {
-                updateFile(fileContents, /(?i)tags\s*=\s*\{[^}]*}/, commiter_ID, filePath)
+                updateFile(fileContents, /(?i)tags\s*=\s*\{[^}]*\}/, commiter_ID, filePath)
             } else if (fileContents.contains("module") || fileContents.contains("resource")) {
                 handleMainFile(fileContents, commiter_ID, filePath)
             } else if (fileContents.contains("variable")) {
-                // Handle variable files explicitly to prevent issues
-                updateFile(fileContents, /(?i)default\s*=\s*\{[^}]*}/, commiter_ID, filePath)
+                updateFile(fileContents, /(?i)default\s*=\s*\{[^}]*\}/, commiter_ID, filePath)
             }
         }
     }
 }
 
 def updateFile(fileContents, regex, commiter_ID, filePath) {
-    writeFile(file: filePath, text: fileContents.replaceAll(regex) { match ->
+    def updatedContents = fileContents.replaceAll(regex) { match ->
         def block = match[0]
-        block = removeCreatorID(block)
-        block.startsWith("{") ? "merge(${block}, { CreatorID = \\\"${commiter_ID}\\\" })" : block
-    }, encoding: pipelineConstants.msBuildPipelineConstants.DEFAULT_WEBCONFIG_ENCODING)
+        block = removeCreatorID(block) // Remove existing CreatorID entries
+        block.startsWith("{") 
+            ? "merge(${block.trim()}, { CreatorID = \\\"${commiter_ID}\\\" })" 
+            : block
+    }
+
+    if (updatedContents != fileContents) {
+        writeFile(file: filePath, text: updatedContents, encoding: pipelineConstants.msBuildPipelineConstants.DEFAULT_WEBCONFIG_ENCODING)
+    }
 }
 
 def handleMainFile(fileContents, commiter_ID, filePath) {
@@ -34,14 +40,18 @@ def handleMainFile(fileContents, commiter_ID, filePath) {
     }
 
     if (varTags.isEmpty() || varTags.size() < fileContents.findAll(/(module|resource)/).size()) {
-        updateFile(fileContents, /(?i)tags\s*=\s*\{[^}]*}/, commiter_ID, filePath)
+        updateFile(fileContents, /(?i)tags\s*=\s*\{[^}]*\}/, commiter_ID, filePath)
     } else {
         writeFile(file: filePath, text: fileContents, encoding: pipelineConstants.msBuildPipelineConstants.DEFAULT_WEBCONFIG_ENCODING)
     }
 }
 
 def removeCreatorID(block) {
-    return block?.replaceAll(/CreatorID.*?,?/, "") // Remove existing CreatorID
-                ?.replaceAll(/,?\s*}/, "}")       // Properly close the block
-                ?.replaceAll(/[“”]/, "\"")         // Replace typographical quotes
+    if (!block) return block
+
+    block = block.replaceAll(/CreatorID\s*=\s*".*?"\s*,?/, "") // Remove existing CreatorID
+                 .replaceAll(/,\s*}/, "}") // Remove trailing commas before closing braces
+                 .trim()
+
+    return block
 }
