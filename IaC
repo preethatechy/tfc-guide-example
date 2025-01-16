@@ -176,3 +176,23 @@ if (config.executeUnitTest) {
        
 }
 }
+// Package Stage
+def packageStage(config) {
+    printLog("Stage - Package", true)
+    try {
+        if (config.packageCustomCodeKey) {
+            Map<String, Object> inParams = null
+            genericPipelineFunctions.executeExtendedStage(this, config, config.packageCustomCodeKey, "package", inParams)
+        } else {
+            pipelineUtil.createTarConfigVersionFiles(config)
+        }
+
+        pipelineUtil.logMetrics(config, pipelineConstants.stages.PACKAGE, config.stageTool, 'Package worked', null, pipelineConstants.stagesResults.success)
+    } catch (err) {
+        pipelineUtil.logMetrics(config, pipelineConstants.stages.PACKAGE, config.stageTool, 'Package failed', err.toString(), pipelineConstants.stagesResults.failure)
+        printErrLog("Exception/Error in Package: ${err}")
+    }
+}
+
+
+
