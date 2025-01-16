@@ -437,3 +437,13 @@ def executeCustomCommand(command) {
         pipelineUtil.executeCommand("${command}", false)
     }
 }
+
+  def scmDownloadStage(config, terraformAppIaCValidator) {
+        printLog("Stage - Source Control Download", true)
+        try {
+            scmCheckout(config, pipelineConstants.stages.SCM)
+        } catch (err) {
+            printErrLog("Exception/Error in SCM Checkout: ${err}")
+        }
+        terraformAppIaCValidator.validate(config)
+    }
