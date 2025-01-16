@@ -261,4 +261,66 @@ def changeFileContents(regex, commiter_ID, fileContents, fileName, filePath) {
 def removeCreatorID(block) {
     block.replaceAll(/CreatorID\s*=\s*".*?"\s*,?/, "").replaceAll(/,\s*}/, "}").trim()
 }
+def readReleaseConfigFile(config, String stage = "") {
+    def releaseConfigFile = "${env.WORKSPACE}/ReleaseConfigFile.json"
+    echo "release config : ${releaseConfigFile}"
 
+    if (!fileExists(releaseConfigFile)) error "Config file not found: ${releaseConfigFile}"
+
+    def data = new JsonSlurperClassic().parseText(readFile(releaseConfigFile))
+    def releaseEnvironments = data.component.integratedReleaseEnvironments ?: data.component.integratedConfigFileContent?.releases?.collect { it.integratedReleaseEnvironments }.flatten()
+
+    if (!releaseEnvironments?.size()) error "No valid release environments found."
+
+    releaseEnvironments.each { env ->
+        def envDetails = data.environments?.find { it.environmentName == env }
+        if (!envDetails) error "Environment ${env} not found."
+
+        assignConfigValues(config, envDetails)
+
+        if (validatePhaseConfig(config) && shouldProcessBranch(config)) {
+            handleStage(config, stage)
+        }
+    }
+
+    echo "Environments published: ${envPackaged}"
+}
+
+// Assign config values from environment details
+def assignConfigValues(config, envDetails) {
+    config.with {
+        env = envDetails.environmentName
+        phase = envDetails.phaseType
+        tfeworkspace = envDetails.tfeworkspaceName
+        tfeOrganization = envDetails.tfeOrgName
+        tfeInstance = envDetails.tfeInstanceEnvName ?: "PROD"
+        tfeurl = pipelineUtil.getPipelineDetails(config).tfeUrl
+    }
+}
+
+// Validate phase configuration
+def validatePhaseConfig(config) {
+    def validPhases = ["DEV", "LLE", "PROD"]
+    def validOrg = config.tfeOrganization.toUpperCase().contains(config.phase == "DEV" ? "DEV" : config.phase == "LLE" ? "UAT" : "PROD")
+
+    if (!validPhases.contains(config.phase.toUpperCase())) error "Invalid phase: ${config.phase}. Use [DEV, LLE, PROD]."
+    if (!validOrg) printErrLog("Invalid environment/phase combination for ${config.phase}.")
+    return validOrg
+}
+
+// Check if the current branch should process the environment
+def shouldProcessBranch(config) {
+    def branchName = pipelineUtil.script.env.BRANCH_NAME
+    return branchName.startsWith(pipelineConstants.FEATURE_BRANCH_NAME) || branchName == pipelineConstants.DEVELOP_BRANCH_NAME || branchName.startsWith(pipelineConstants.RELEASE_BRANCH_NAME)
+}
+
+// Handle the stage (either PACKAGE or other)
+def handleStage(config, stage) {
+    if (stage == pipelineConstants.stages.PACKAGE) packageStage(config)
+    else {
+        config.tfetoken = pipelineUtil.getTokenFromVault(config)
+        config.token.put(config.phase, "'${config.tfetoken}'")
+        publishConfigurationstage(config)
+        envPackaged.add(config.env)
+    }
+}
