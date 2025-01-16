@@ -1,0 +1,72 @@
+Here’s a textual representation of the flow diagram that you can use in a Word document. You can later format it into an actual diagram using Word’s built-in tools like shapes and arrows:
+
+Flow Diagram - Function-Level Overview
+
+1. Entry Point: call(body)
+	•	Description: Main entry point of the pipeline execution.
+	•	Steps:
+	1.	Define config as an empty map.
+	2.	Resolve the body closure to populate the config.
+	3.	Call startterraformAppIaCPipelinePlugin(config).
+
+2. Function: startterraformAppIaCPipelinePlugin(config)
+	•	Purpose: Orchestrates pipeline stages based on the configuration.
+	•	Steps:
+	1.	Initialize terraformAppIacValidator.
+	2.	Validate that the job is not calling itself.
+	3.	Configure pipeline utilities (e.g., logging, notifications).
+	4.	Validate and check for job chaining.
+	5.	Call Sub-Functions Based on Configuration:
+	•	scmDownloadStage(config): Manages source control downloads.
+	•	executeEnterpriseSecurityScan(config) (if enabled): Triggers an enterprise security scan.
+	•	sonarScanStage(config): Performs a SonarQube code quality scan.
+	•	packageStage(config): Handles packaging logic.
+	•	publishConfigurationStage(config): Publishes configuration files based on the branch and environment.
+	•	readReleaseConfigFile(config, stage): Reads release configurations and processes environments.
+
+3. Function: scmDownloadStage(config)
+	•	Purpose: Downloads source code from SCM.
+	•	Steps:
+	1.	Perform SCM checkout.
+	2.	Validate downloaded code using terraformAppIacValidator.
+
+4. Function: executeEnterpriseSecurityScan(config)
+	•	Purpose: Executes an enterprise security scan.
+	•	Steps:
+	1.	Validate scan configuration.
+	2.	Trigger the security scan process.
+
+5. Function: sonarScanStage(config)
+	•	Purpose: Conducts a SonarQube code quality analysis.
+	•	Steps:
+	1.	Pass the required configuration to the Sonar plugin.
+	2.	Log results and metrics.
+
+6. Function: packageStage(config)
+	•	Purpose: Packages files based on branch and environment.
+	•	Steps:
+	1.	Execute custom packaging logic (if defined).
+	2.	Log packaging metrics and results.
+
+7. Function: publishConfigurationStage(config)
+	•	Purpose: Publishes configuration files to the target environment.
+	•	Steps:
+	1.	Validate the environment and workspace details.
+	2.	Build configuration stages.
+	3.	Publish configuration files to the TFE workspace.
+
+8. Function: readReleaseConfigFile(config, stage)
+	•	Purpose: Reads and processes the release configuration file.
+	•	Steps:
+	1.	Parse the JSON release configuration file.
+	2.	Extract environment-specific details.
+	3.	Assign environment-specific configurations to config.
+	4.	Validate phase and branch compatibility.
+	5.	Call packageStage(config) or publishConfigurationStage(config) based on the current stage.
+
+Cleanup and Notifications
+	•	Sub-functions:
+	1.	pipelineUtil.cleanWorkspacePostBuild(config): Cleans up the workspace after the build.
+	2.	pipelineUtil.sendEmailNotificationOnSuccessAndUnstable(): Sends notifications based on the build result.
+
+You can use this structure to create a flow diagram by representing each function as a box and linking them based on the dependencies and execution flow. Add decision points (e.g., conditions like if config.execute...) as diamonds in the flowchart for better clarity.
