@@ -1,57 +1,60 @@
 def autoTagging(config) {
-    def path = pwd(), commiter_ID = pipelineUtil.get_nbkid(config)
+    def path = pwd()
+    def commiter_ID = pipelineUtil.get_nbkid(config)
     println("NBK_ID of user who triggered the build: ${commiter_ID}")
     config.commiterId = "${commiter_ID}"
 
-    // Process all .tfvars and .tf files
-    [".tfvars", ".tf"].each { ext ->
-        findFiles(glob: "**/*${ext}").each { file ->
-            def filePath = "${path}/${file}", fileContents = pipelineUtil.script.readFile(filePath)
+    // Process .tfvars and .tf files
+    ["tfvars", "tf"].each { ext ->
+        findFiles(glob: "**/*.${ext}").each { file ->
+            def filePath = "${path}/${file}"
+            def fileContents = pipelineUtil.script.readFile(filePath)
 
             if (file.name.endsWith(".tfvars")) {
-                updateFile(fileContents, /(?i)tags\s*=\s*\{[^}]*\}/, commiter_ID, filePath)
-            } else if (fileContents.contains("module") || fileContents.contains("resource")) {
-                handleMainFile(fileContents, commiter_ID, filePath)
-            } else if (fileContents.contains("variable")) {
-                updateFile(fileContents, /(?i)default\s*=\s*\{[^}]*\}/, commiter_ID, filePath)
+                changeFileContents(/(?s)(?i)tags\s*=\s*{.*?}/, commiter_ID, fileContents, file.name, filePath)
+            } else {
+                handleTfFile(fileContents, file.name, filePath, commiter_ID)
             }
         }
     }
 }
 
-def updateFile(fileContents, regex, commiter_ID, filePath) {
-    def updatedContents = fileContents.replaceAll(regex) { match ->
-        def block = match[0]
-        block = removeCreatorID(block) // Remove existing CreatorID entries
-        block.startsWith("{") 
-            ? "merge(${block.trim()}, { CreatorID = \\\"${commiter_ID}\\\" })" 
-            : block
-    }
+def handleTfFile(fileContents, fileName, filePath, commiter_ID) {
+    def varTags = fileContents.findAll(/(?i)var\.tags/).unique()
+    def hasModulesOrResources = fileContents.contains("module") || fileContents.contains("resource")
+    def hasVariables = fileContents.contains("variable")
 
-    if (updatedContents != fileContents) {
-        writeFile(file: filePath, text: updatedContents, encoding: pipelineConstants.msBuildPipelineConstants.DEFAULT_WEBCONFIG_ENCODING)
+    if (hasModulesOrResources) {
+        varTags.each {
+            fileContents = fileContents.replace(it, "merge(${it}, { CreatorID = \"${commiter_ID}\" })")
+        }
+        if (varTags.size() < fileContents.findAll(/(module|resource)/).size()) {
+            changeFileContents(/(?s)(?i)tags\s*=\s*{.*?}/, commiter_ID, fileContents, fileName, filePath)
+        } else {
+            writeFile(file: filePath, text: fileContents, encoding: pipelineConstants.msBuildPipelineConstants.DEFAULT_WEBCONFIG_ENCODING)
+        }
+    } else if (hasVariables) {
+        changeFileContents(/(?s)(?i)default\s*=\s*{.*?}/, commiter_ID, fileContents, fileName, filePath)
     }
 }
 
-def handleMainFile(fileContents, commiter_ID, filePath) {
-    def varTags = fileContents.findAll(/(?i)var\.tags/).unique()
-    varTags.each {
-        fileContents = fileContents.replace(it, "merge(${it}, { CreatorID = \\\"${commiter_ID}\\\" })")
+def changeFileContents(regex, commiter_ID, fileContents, fileName, filePath) {
+    def matches = fileContents.findAll(regex).unique()
+    def modifiedContents = matches.collect { block ->
+        removeCreatorID(block).let { cleanedBlock ->
+            cleanedBlock.startsWith("{") 
+                ? "merge(${cleanedBlock}, { CreatorID = \"${commiter_ID}\" })" 
+                : cleanedBlock
+        }
     }
 
-    if (varTags.isEmpty() || varTags.size() < fileContents.findAll(/(module|resource)/).size()) {
-        updateFile(fileContents, /(?i)tags\s*=\s*\{[^}]*\}/, commiter_ID, filePath)
-    } else {
-        writeFile(file: filePath, text: fileContents, encoding: pipelineConstants.msBuildPipelineConstants.DEFAULT_WEBCONFIG_ENCODING)
+    matches.eachWithIndex { match, idx ->
+        fileContents = fileContents.replace(match, modifiedContents[idx])
     }
+
+    writeFile(file: filePath, text: fileContents, encoding: pipelineConstants.msBuildPipelineConstants.DEFAULT_WEBCONFIG_ENCODING)
 }
 
 def removeCreatorID(block) {
-    if (!block) return block
-
-    block = block.replaceAll(/CreatorID\s*=\s*".*?"\s*,?/, "") // Remove existing CreatorID
-                 .replaceAll(/,\s*}/, "}") // Remove trailing commas before closing braces
-                 .trim()
-
-    return block
+    block.replaceAll(/CreatorID\s*=\s*".*?"\s*,?/, "").replaceAll(/,\s*}/, "}").trim()
 }
