@@ -1,0 +1,41 @@
+def starterafromAppIacPipelinePlugin(config) {
+    node(targetBuildAgent) {
+        try {
+            stage(pipelineConstants.stages.SCM) {
+                if (pipelineUtil.script.env.BRANCH_NAME.startsWith(pipelineConstants.PULL_REQUEST_BRANCH_PREFIX)) {
+                    config.put(disableStage, false)
+                }
+                wrapStageMetricsMessage(config, pipelineConstants.stages.SCM, pipelineConstants.stagesResults.ended)
+            }
+
+            // For ESP Security Scan
+            if (config.executeEnterpriseSecurityScan) {
+                stage(pipelineConstants.stages.ESPSECURITY_SCAN) {
+                    genericPipelineFunctions.executeEnterpriseSecurityScan(pipelineUtil.script, config)
+                }
+            }
+
+            if (config.executeCheckmarxScan) {
+                stage(pipelineConstants.stages.CHECKMARX_SCAN) {
+                    wrapStageMetricsMessage(config, pipelineConstants.stages.CHECKMARX_SCAN, pipelineConstants.stagesResults.started)
+                    genericPipelineFunctions.executeCheckmarxScan(pipelineUtil.script, config)
+                    wrapStageMetricsMessage(config, pipelineConstants.stages.CHECKMARX_SCAN, pipelineConstants.stagesResults.ended)
+                }
+            }
+
+            if (config.executeCodeScan) {
+                stage(pipelineConstants.stages.SCAN) {
+                    wrapStageMetricsMessage(config, pipelineConstants.stages.SCAN, pipelineConstants.stagesResults.started)
+                    sonarScanStage(config)
+                    wrapStageMetricsMessage(config, pipelineConstants.stages.SCAN, pipelineConstants.stagesResults.ended)
+                }
+            }
+
+            if (config.executeUnitTest) {
+                stage(pipelineConstants.stages.UNITTEST) {
+                    wrapStageMetricsMessage(config, pipelineConstants.stages.UNITTEST, pipelineConstants.stagesResults.started)
+                }
+            }
+        }
+    }
+}
