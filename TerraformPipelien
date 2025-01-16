@@ -1,0 +1,67 @@
+package org.hz.ci.pipelines.terraform
+
+import org.hz.ci.common.JavaBuildUtil
+import org.hz.core.base.BasePipeline
+import org.hz.core.constants.PipelineConstants as C
+import org.hz.core.constants.PipelineName as PN
+
+class TerraformPipeline extends BasePipeline implements Serializable {
+
+    TerraformPipeline(cbj, params) {
+        super(cbj, params)
+    }
+
+    @Override
+    def onInitialize() {
+        info("Initializing")
+        globalVars.pipelineName = PN.Maven
+        util = new JavaBuildUtil(cbj, params, globalVars, configHelper)
+        validator = new TerraformValidator(this)
+    }
+
+    def getMavenSettingsFileId() {
+        // Implementation for retrieving Maven settings file ID
+    }
+
+    def executeMavenCommands(mavenCommands) {
+        // Implementation for executing Maven commands
+    }
+
+    @Override
+    def onBuildStage(stage) {
+        if (params.publish_mode == "BUILD_SPEC" && params.package_enableAutoVersioning) {
+            transformArtifactVersion()
+        }
+        debug("${stage} command: ${params.build_args}")
+        executeMavenCommands(params.build_args)
+    }
+
+    def runUnitTest() {
+        debug("UnitTest command: ${params.unitTest_args}")
+        executeMavenCommands(params.unitTest_args)
+        return true
+    }
+
+    @Override
+    def onUnitTestStage(stage) {
+        executeUnitTestStage(this.&runUnitTest)
+    }
+
+    @Override
+    def onPackageStage(stage) {
+        executeMavenCommands(params.package_args)
+        util.createZipFiles()
+    }
+
+    @Override
+    def onPublishStage(stage) {
+        if (params.publish_mode == "FILE_SPEC") {
+            executePublishStage(util.&fileBasedPublish)
+        } else {
+            executePublishStage(this.&mavenBuildBasedPublish)
+        }
+        if (params.publish_mainframeCopyToServer) {
+            copyToMainframe()
+        }
+    }
+}
