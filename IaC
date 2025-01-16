@@ -1,10 +1,82 @@
-def starterafromAppIacPipelinePlugin(config) {
+
+    
+def startterraformAppIaCPipelineplugin(config) {
+    
+    def terraformAppIacvalidator = new pipelineValidationBuild(steps, env).getTerraformAppIaCBuildValidator()
+    pipelineUtil.script = this
+
+    // Check if this job is being called from the same build job's deploy stage. If yes, then fail the job
+    terraformAppIacvalidator.validateJobCallingItself(currentBuild)
+
+    // Evaluate the body block, and collect configuration values into the config object
+    pipelineUtil.massageConfiguration(config, 'terraformIaC')
+    pipelineUtil.printPipelineInfo(this, config)
+    pipelineUtil.setNotificationDGEnvVariable(config)
+
+    // If enableBuildJobChaining is true, convert the job into a parameterized one
+    if (config.enableBuildJobChaining) {
+        pipelineUtil.enableBuildJobChaining(config)
+    }
+
+    // Validate for any cyclic dependency and max layer allowed in the chaining
+    terraformAppIacvalidator.validateBuildJobChain(config, params.ancestorJobList)
+
+    // Start Code Added for Instrumentation Metrics
+    def stageTool = pipelineUtil.setStageToolMapForMetrics("", "","","")
+config.stageTool = stageTool
+
+    def splunkToken = pipelineUtil.getCredentialSecretText(pipelineConstants.metricsConstants.envSplunkTokenName)
+
+    def pipelineMetricsEvent = new pipelineMetricsEvent.newInstance(this, config, 'CI', 'TerraformAppIac', 'SDLC_2.x', splunkToken)
+    config.pipelineMetricsEvent = pipelineMetricsEvent
+    config.splunkenvironment = pipelineMetricsEvent.environment
+    config.buildToolVersion = "'
+    config.buildToolName = ""
+    config.token = [:]
+
+    if (!pipelineConstants.stagesResults.STAGE_METRICS_FLAG) {
+        printLog("STAGE_METRICS_FLAG is Disabled", true)
+    }
+    // End Code Added for Instrumentation Metrics
+
+    printLog("config.ait ${config.ait}", config.debug)
+
+    // Setting default label value
+    def targetBuildAgent = pipelineConstants.javaBuildPipelineConstants.JAVA_BUIlD_AGENT_LABELS
+
+    if (config.containsKey("jenkinsBuildAgent")) {
+        // Validate jenkinsBuildAgent value for allowed characters
+        terraformAppIacvalidator.validateBuildLabel("jenkinsBuildAgent", config.jenkinsBuildAgent)
+        targetBuildAgent = config.jenkinsBuildAgent.trim()
+
+        // Check if the provided label is available on Jenkins
+        if (!pipelineUtil.getJenkinsAvailableLabelsList().contains(targetBuildAgent)) {
+            printErrLog("Provided Jenkins Build Agent Label: \"${targetBuildAgent}\" is not available. Please specify an appropriate value.")
+        } else {
+            echo "Provided Jenkins Build Agent Label: \"${targetBuildAgent}\" is available"
+        }
+    }
+
+    // Default timeout setting
+    def defaultTimeOut = config.tibcoTimeout ?: 30
+
     node(targetBuildAgent) {
+        wrapStageMetricsMessage(config, '',config.pipelineMetricsEvent.pipelineBuildType+pipelineConstants.stagesResults._pipeline+
+        pipelineConstants.stagesResults.started)
+
         try {
+            // SCM Stage
             stage(pipelineConstants.stages.SCM) {
-                if (pipelineUtil.script.env.BRANCH_NAME.startsWith(pipelineConstants.PULL_REQUEST_BRANCH_PREFIX)) {
-                    config.put(disableStage, false)
+                wrapStageMetricsMessage(config, pipelineConstants.stages.SCM, pipelineConstants.stagesResults.started)
+                scmDownloadStage(config, terraformAppIaCValidator)
+
+                // Check if it's a PR build and disable the pipeline stages
+                if (pipelineConstants.terraformAppIaCPipelineConstants.DISABLE_PUBLISH_FOR_PULL_REQ_BUILD && pipelineUtil.script.env.BRANCH_NAME.startsWith(pipelineConstants.PULL_REQUEST_BRANCH_PREFIX)) {
+                    for (disableStage in pipelineConstants.PR_BUILD_DISABLE_TFE_IAC_PIPELINE_STAGES) {
+                        config.put(disableStage, false)
+                    }
                 }
+            
                 wrapStageMetricsMessage(config, pipelineConstants.stages.SCM, pipelineConstants.stagesResults.ended)
             }
 
@@ -31,11 +103,76 @@ def starterafromAppIacPipelinePlugin(config) {
                 }
             }
 
-            if (config.executeUnitTest) {
+
+if (config.executeUnitTest) {
                 stage(pipelineConstants.stages.UNITTEST) {
                     wrapStageMetricsMessage(config, pipelineConstants.stages.UNITTEST, pipelineConstants.stagesResults.started)
+
+                    if (config.createTibcoAliasFile || 
+                        (config.containsKey(pipelineConstants.JENKINS_BUILD_AGENT) && 
+                        (config.get(pipelineConstants.JENKINS_BUILD_AGENT).equals(pipelineConstants.TIBCO_BUILD_AGENT_LABEL) || 
+                        config.get(pipelineConstants.JENKINS_BUILD_AGENT).equals(pipelineConstants.TIBCO_BUILD_AGENT_NEXT_LABEL)))) {
+                        
+                        timeout(time: defaultTimeOut, unit: 'MINUTES') {
+                            // Execute TIBCO-specific logic here if needed
+                        }
+                    } else {
+                        // Execute unit test stage
+                        // unitTestStage(config) - Uncomment and define this method if needed
+                    }
+
+                    wrapStageMetricsMessage(config, pipelineConstants.stages.UNITTEST, pipelineConstants.stagesResults.ended)
                 }
             }
-        }
-    }
+
+            if (config.executeCreateInfrastructure || config.executeDestroyInfrastructure) {
+                readReleaseConfigFile(config)
+                def isDeploy = checkAppInfraDeploy(config)
+                echo "What stage should process: ${isDeploy}"
+
+                if ((pipelineUtil.script.env.BRANCH_NAME.startsWith(pipelineConstants.FEATURE_BRANCH_NAME) || 
+                     pipelineUtil.script.env.BRANCH_NAME == pipelineConstants.DEVELOP_BRANCH_NAME) && 
+                    (config.isTFELLE) || 
+                    pipelineUtil.script.env.BRANCH_NAME.startsWith(pipelineConstants.RELEASE_BRANCH_NAME)) {
+                    
+                    stage(pipelineConstants.stages.PACKAGE) {
+                        autoTagging(config)
+                        wrapStageMetricsMessage(config, pipelineConstants.stages.PACKAGE, pipelineConstants.stagesResults.started)
+                        readReleaseConfigFile(config, pipelineConstants.stages.PACKAGE)
+                        wrapStageMetricsMessage(config, pipelineConstants.stages.PACKAGE, pipelineConstants.stagesResults.ended)
+                    }
+
+                    stage(pipelineConstants.stages.PUBLISHCONFIGFILES) {
+                        wrapStageMetricsMessage(config, pipelineConstants.stages.PUBLISHCONFIGFILES, pipelineConstants.stagesResults.started)
+                        readReleaseConfigFile(config, pipelineConstants.stages.PUBLISHCONFIGFILES)
+                        wrapStageMetricsMessage(config, pipelineConstants.stages.PUBLISHCONFIGFILES, pipelineConstants.stagesResults.ended)
+                    }
+                   stage(isDeploy) {
+                        wrapStageMetricsMessage(config, pipelineConstants.stages.DEPLOY, pipelineConstants.stagesResults.started)
+                        config.isTFE = true // Controls TFE & non-TFE flow in XLR creation
+                        jenkinsxlrPlugin(config)
+                        wrapStageMetricsMessage(config, pipelineConstants.stages.DEPLOY, pipelineConstants.stagesResults.ended)
+                   }
+}
+}
+ if (config.executeComplianceScan) {
+                stage(pipelineConstants.stages.COMPLIANCE_SCAN) {
+                    wrapStageMetricsMessage(config, pipelineConstants.stages.COMPLIANCE_SCAN, pipelineConstants.stagesResults.started)
+                    genericPipelineFunctions.executeComplianceScan(pipelineUtil.script, config)
+                    wrapStageMetricsMessage(config, pipelineConstants.stages.COMPLIANCE_SCAN, pipelineConstants.stagesResults.ended)
+                }
+            }
+}
+    finally {
+            // Cleanup and notifications
+            pipelineUtil.cleanWorkspacePostBuild(config)
+            pipelineUtil.pushToCelestial(config)
+}
+            pipelineUtil.sendEmailNotificationOnSuccessAndUnstable(currentBuild.currentResult)
+            pipelineUtil.matterMostNotification(currentBuild.currentResult, config)
+            wrapStageMetricsMessage(config, '', config.pipelineMetricsEvent.pipelineBuildType + 
+                                    pipelineConstants.stagesResults.pipeline + 
+                                    pipelineConstants.stagesResults.ended)
+       
+}
 }
