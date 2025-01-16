@@ -11,7 +11,7 @@ def autoTagging(config) {
             def fileContents = pipelineUtil.script.readFile(filePath)
 
             if (file.name.endsWith(".tfvars")) {
-                changeFileContents(/(?s)(?i)tags\s*=\s*{.*?}/, commiter_ID, fileContents, file.name, filePath)
+                changeFileContents( /(?s)(?i)tags\s*=\s*\{[^}]*\}/, commiter_ID, fileContents, file.name, filePath)
             } else {
                 handleTfFile(fileContents, file.name, filePath, commiter_ID)
             }
