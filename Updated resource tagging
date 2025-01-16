@@ -40,6 +40,11 @@ def handleTfFile(fileContents, fileName, filePath, commiter_ID) {
 
 def changeFileContents(regex, commiter_ID, fileContents, fileName, filePath) {
     def matches = fileContents.findAll(regex).unique()
+    if (!matches) {
+        println("No matches found for regex: ${regex} in file: ${fileName}")
+        return
+    }
+
     def modifiedContents = matches.collect { block ->
         def cleanedBlock = removeCreatorID(block)
         if (cleanedBlock.startsWith("{")) {
@@ -53,6 +58,7 @@ def changeFileContents(regex, commiter_ID, fileContents, fileName, filePath) {
         fileContents = fileContents.replace(match, modifiedContents[idx])
     }
 
+    println("Updated file contents for ${fileName}: ${fileContents}")
     writeFile(file: filePath, text: fileContents, encoding: pipelineConstants.msBuildPipelineConstants.DEFAULT_WEBCONFIG_ENCODING)
 }
 
