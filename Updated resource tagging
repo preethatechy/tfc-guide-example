@@ -41,10 +41,11 @@ def handleTfFile(fileContents, fileName, filePath, commiter_ID) {
 def changeFileContents(regex, commiter_ID, fileContents, fileName, filePath) {
     def matches = fileContents.findAll(regex).unique()
     def modifiedContents = matches.collect { block ->
-        removeCreatorID(block).let { cleanedBlock ->
-            cleanedBlock.startsWith("{") 
-                ? "merge(${cleanedBlock}, { CreatorID = \"${commiter_ID}\" })" 
-                : cleanedBlock
+        def cleanedBlock = removeCreatorID(block)
+        if (cleanedBlock.startsWith("{")) {
+            "merge(${cleanedBlock}, { CreatorID = \"${commiter_ID}\" })"
+        } else {
+            cleanedBlock
         }
     }
 
