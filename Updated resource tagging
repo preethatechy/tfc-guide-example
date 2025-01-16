@@ -11,7 +11,7 @@ def autoTagging(config) {
             def fileContents = pipelineUtil.script.readFile(filePath)
 
             if (file.name.endsWith(".tfvars")) {
-                changeFileContents( /(?s)(?i)tags\s*=\s*\{[^}]*\}/, commiter_ID, fileContents, file.name, filePath)
+                changeFileContents(/(?s)(?i)tags\s*=\s*\{[^}]*\}/, commiter_ID, fileContents, file.name, filePath)
             } else {
                 handleTfFile(fileContents, file.name, filePath, commiter_ID)
             }
@@ -29,12 +29,12 @@ def handleTfFile(fileContents, fileName, filePath, commiter_ID) {
             fileContents = fileContents.replace(it, "merge(${it}, { CreatorID = \"${commiter_ID}\" })")
         }
         if (varTags.size() < fileContents.findAll(/(module|resource)/).size()) {
-            changeFileContents(/(?s)(?i)tags\s*=\s*{.*?}/, commiter_ID, fileContents, fileName, filePath)
+            changeFileContents(/(?s)(?i)tags\s*=\s*\{[^}]*\}/, commiter_ID, fileContents, fileName, filePath)
         } else {
             writeFile(file: filePath, text: fileContents, encoding: pipelineConstants.msBuildPipelineConstants.DEFAULT_WEBCONFIG_ENCODING)
         }
     } else if (hasVariables) {
-        changeFileContents(/(?s)(?i)default\s*=\s*{.*?}/, commiter_ID, fileContents, fileName, filePath)
+        changeFileContents(/(?s)(?i)default\s*=\s*\{[^}]*\}/, commiter_ID, fileContents, fileName, filePath)
     }
 }
 
