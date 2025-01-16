@@ -1,0 +1,474 @@
+import pipelineMetricsEvent
+import pipelineConstants
+import pipelineUtil
+import static pipelineUtil.printLog
+import static pipelineUtil.printErrLog
+import groovy.json.JsonSlurper
+import groovy.json.JsonSlurperClassic
+import static pipelineUtil.wrapStageMetricsMessage
+import java.io.File
+import java.io.FileReader
+import java.io.FileWriter
+import java.lang.String.*
+import java.util.*
+import java.util.regex.Matcher
+import java.util.regex.Pattern
+import org.jsoup.Jsoup
+
+// Main entry point
+def call(body) {
+    def config = [:]
+    body.resolveStrategy = Closure.DELEGATE_FIRST
+    body.delegate = config
+    timestamps {
+        startterraformAppIaCPipelinePlugin(config)
+    }
+}
+    
+def startterraformAppIaCPipelineplugin(config) {
+    
+    def terraformAppIacvalidator = new pipelineValidationBuild(steps, env).getTerraformAppIaCBuildValidator()
+    pipelineUtil.script = this
+
+    // Check if this job is being called from the same build job's deploy stage. If yes, then fail the job
+    terraformAppIacvalidator.validateJobCallingItself(currentBuild)
+
+    // Evaluate the body block, and collect configuration values into the config object
+    pipelineUtil.massageConfiguration(config, 'terraformIaC')
+    pipelineUtil.printPipelineInfo(this, config)
+    pipelineUtil.setNotificationDGEnvVariable(config)
+
+    // If enableBuildJobChaining is true, convert the job into a parameterized one
+    if (config.enableBuildJobChaining) {
+        pipelineUtil.enableBuildJobChaining(config)
+    }
+
+    // Validate for any cyclic dependency and max layer allowed in the chaining
+    terraformAppIacvalidator.validateBuildJobChain(config, params.ancestorJobList)
+
+    // Start Code Added for Instrumentation Metrics
+    def stageTool = pipelineUtil.setStageToolMapForMetrics("", "","","")
+config.stageTool = stageTool
+
+    def splunkToken = pipelineUtil.getCredentialSecretText(pipelineConstants.metricsConstants.envSplunkTokenName)
+
+    def pipelineMetricsEvent = new pipelineMetricsEvent.newInstance(this, config, 'CI', 'TerraformAppIac', 'SDLC_2.x', splunkToken)
+    config.pipelineMetricsEvent = pipelineMetricsEvent
+    config.splunkenvironment = pipelineMetricsEvent.environment
+    config.buildToolVersion = "'
+    config.buildToolName = ""
+    config.token = [:]
+
+    if (!pipelineConstants.stagesResults.STAGE_METRICS_FLAG) {
+        printLog("STAGE_METRICS_FLAG is Disabled", true)
+    }
+    // End Code Added for Instrumentation Metrics
+
+    printLog("config.ait ${config.ait}", config.debug)
+
+    // Setting default label value
+    def targetBuildAgent = pipelineConstants.javaBuildPipelineConstants.JAVA_BUIlD_AGENT_LABELS
+
+    if (config.containsKey("jenkinsBuildAgent")) {
+        // Validate jenkinsBuildAgent value for allowed characters
+        terraformAppIacvalidator.validateBuildLabel("jenkinsBuildAgent", config.jenkinsBuildAgent)
+        targetBuildAgent = config.jenkinsBuildAgent.trim()
+
+        // Check if the provided label is available on Jenkins
+        if (!pipelineUtil.getJenkinsAvailableLabelsList().contains(targetBuildAgent)) {
+            printErrLog("Provided Jenkins Build Agent Label: \"${targetBuildAgent}\" is not available. Please specify an appropriate value.")
+        } else {
+            echo "Provided Jenkins Build Agent Label: \"${targetBuildAgent}\" is available"
+        }
+    }
+
+    // Default timeout setting
+    def defaultTimeOut = config.tibcoTimeout ?: 30
+
+    node(targetBuildAgent) {
+        wrapStageMetricsMessage(config, '',config.pipelineMetricsEvent.pipelineBuildType+pipelineConstants.stagesResults._pipeline+
+        pipelineConstants.stagesResults.started)
+
+        try {
+            // SCM Stage
+            stage(pipelineConstants.stages.SCM) {
+                wrapStageMetricsMessage(config, pipelineConstants.stages.SCM, pipelineConstants.stagesResults.started)
+                scmDownloadStage(config, terraformAppIaCValidator)
+
+                // Check if it's a PR build and disable the pipeline stages
+                if (pipelineConstants.terraformAppIaCPipelineConstants.DISABLE_PUBLISH_FOR_PULL_REQ_BUILD && pipelineUtil.script.env.BRANCH_NAME.startsWith(pipelineConstants.PULL_REQUEST_BRANCH_PREFIX)) {
+                    for (disableStage in pipelineConstants.PR_BUILD_DISABLE_TFE_IAC_PIPELINE_STAGES) {
+                        config.put(disableStage, false)
+                    }
+                }
+            
+                wrapStageMetricsMessage(config, pipelineConstants.stages.SCM, pipelineConstants.stagesResults.ended)
+            }
+
+            // For ESP Security Scan
+            if (config.executeEnterpriseSecurityScan) {
+                stage(pipelineConstants.stages.ESPSECURITY_SCAN) {
+                    genericPipelineFunctions.executeEnterpriseSecurityScan(pipelineUtil.script, config)
+                }
+            }
+
+            if (config.executeCheckmarxScan) {
+                stage(pipelineConstants.stages.CHECKMARX_SCAN) {
+                    wrapStageMetricsMessage(config, pipelineConstants.stages.CHECKMARX_SCAN, pipelineConstants.stagesResults.started)
+                    genericPipelineFunctions.executeCheckmarxScan(pipelineUtil.script, config)
+                    wrapStageMetricsMessage(config, pipelineConstants.stages.CHECKMARX_SCAN, pipelineConstants.stagesResults.ended)
+                }
+            }
+
+            if (config.executeCodeScan) {
+                stage(pipelineConstants.stages.SCAN) {
+                    wrapStageMetricsMessage(config, pipelineConstants.stages.SCAN, pipelineConstants.stagesResults.started)
+                    sonarScanStage(config)
+                    wrapStageMetricsMessage(config, pipelineConstants.stages.SCAN, pipelineConstants.stagesResults.ended)
+                }
+            }
+
+
+if (config.executeUnitTest) {
+                stage(pipelineConstants.stages.UNITTEST) {
+                    wrapStageMetricsMessage(config, pipelineConstants.stages.UNITTEST, pipelineConstants.stagesResults.started)
+
+                    if (config.createTibcoAliasFile || 
+                        (config.containsKey(pipelineConstants.JENKINS_BUILD_AGENT) && 
+                        (config.get(pipelineConstants.JENKINS_BUILD_AGENT).equals(pipelineConstants.TIBCO_BUILD_AGENT_LABEL) || 
+                        config.get(pipelineConstants.JENKINS_BUILD_AGENT).equals(pipelineConstants.TIBCO_BUILD_AGENT_NEXT_LABEL)))) {
+                        
+                        timeout(time: defaultTimeOut, unit: 'MINUTES') {
+                            // Execute TIBCO-specific logic here if needed
+                        }
+                    } else {
+                        // Execute unit test stage
+                        // unitTestStage(config) - Uncomment and define this method if needed
+                    }
+
+                    wrapStageMetricsMessage(config, pipelineConstants.stages.UNITTEST, pipelineConstants.stagesResults.ended)
+                }
+            }
+
+            if (config.executeCreateInfrastructure || config.executeDestroyInfrastructure) {
+                readReleaseConfigFile(config)
+                def isDeploy = checkAppInfraDeploy(config)
+                echo "What stage should process: ${isDeploy}"
+
+                if ((pipelineUtil.script.env.BRANCH_NAME.startsWith(pipelineConstants.FEATURE_BRANCH_NAME) || 
+                     pipelineUtil.script.env.BRANCH_NAME == pipelineConstants.DEVELOP_BRANCH_NAME) && 
+                    (config.isTFELLE) || 
+                    pipelineUtil.script.env.BRANCH_NAME.startsWith(pipelineConstants.RELEASE_BRANCH_NAME)) {
+                    
+                    stage(pipelineConstants.stages.PACKAGE) {
+                        autoTagging(config)
+                        wrapStageMetricsMessage(config, pipelineConstants.stages.PACKAGE, pipelineConstants.stagesResults.started)
+                        readReleaseConfigFile(config, pipelineConstants.stages.PACKAGE)
+                        wrapStageMetricsMessage(config, pipelineConstants.stages.PACKAGE, pipelineConstants.stagesResults.ended)
+                    }
+
+                    stage(pipelineConstants.stages.PUBLISHCONFIGFILES) {
+                        wrapStageMetricsMessage(config, pipelineConstants.stages.PUBLISHCONFIGFILES, pipelineConstants.stagesResults.started)
+                        readReleaseConfigFile(config, pipelineConstants.stages.PUBLISHCONFIGFILES)
+                        wrapStageMetricsMessage(config, pipelineConstants.stages.PUBLISHCONFIGFILES, pipelineConstants.stagesResults.ended)
+                    }
+                   stage(isDeploy) {
+                        wrapStageMetricsMessage(config, pipelineConstants.stages.DEPLOY, pipelineConstants.stagesResults.started)
+                        config.isTFE = true // Controls TFE & non-TFE flow in XLR creation
+                        jenkinsxlrPlugin(config)
+                        wrapStageMetricsMessage(config, pipelineConstants.stages.DEPLOY, pipelineConstants.stagesResults.ended)
+                   }
+}
+}
+ if (config.executeComplianceScan) {
+                stage(pipelineConstants.stages.COMPLIANCE_SCAN) {
+                    wrapStageMetricsMessage(config, pipelineConstants.stages.COMPLIANCE_SCAN, pipelineConstants.stagesResults.started)
+                    genericPipelineFunctions.executeComplianceScan(pipelineUtil.script, config)
+                    wrapStageMetricsMessage(config, pipelineConstants.stages.COMPLIANCE_SCAN, pipelineConstants.stagesResults.ended)
+                }
+            }
+}
+    finally {
+            // Cleanup and notifications
+            pipelineUtil.cleanWorkspacePostBuild(config)
+            pipelineUtil.pushToCelestial(config)
+}
+            pipelineUtil.sendEmailNotificationOnSuccessAndUnstable(currentBuild.currentResult)
+            pipelineUtil.matterMostNotification(currentBuild.currentResult, config)
+            wrapStageMetricsMessage(config, '', config.pipelineMetricsEvent.pipelineBuildType + 
+                                    pipelineConstants.stagesResults.pipeline + 
+                                    pipelineConstants.stagesResults.ended)
+       
+}
+}
+// Package Stage
+def packageStage(config) {
+    printLog("Stage - Package", true)
+    try {
+        if (config.packageCustomCodeKey) {
+            Map<String, Object> inParams = null
+            genericPipelineFunctions.executeExtendedStage(this, config, config.packageCustomCodeKey, "package", inParams)
+        } else {
+            pipelineUtil.createTarConfigVersionFiles(config)
+        }
+
+        pipelineUtil.logMetrics(config, pipelineConstants.stages.PACKAGE, config.stageTool, 'Package worked', null, pipelineConstants.stagesResults.success)
+    } catch (err) {
+        pipelineUtil.logMetrics(config, pipelineConstants.stages.PACKAGE, config.stageTool, 'Package failed', err.toString(), pipelineConstants.stagesResults.failure)
+        printErrLog("Exception/Error in Package: ${err}")
+    }
+}
+
+def autoTagging(config) {
+    def path = pwd()
+    def commiter_ID = pipelineUtil.get_nbkid(config)
+    println("NBK_ID of user who triggered the build: ${commiter_ID}")
+    config.commiterId = "${commiter_ID}"
+
+    // Process .tfvars and .tf files
+    ["tfvars", "tf"].each { ext ->
+        findFiles(glob: "**/*.${ext}").each { file ->
+            def filePath = "${path}/${file}"
+            def fileContents = pipelineUtil.script.readFile(filePath)
+
+            if (file.name.endsWith(".tfvars")) {
+                changeFileContents(/(?s)(?i)tags\s*=\s*\{[^}]*\}/, commiter_ID, fileContents, file.name, filePath)
+            } else {
+                handleTfFile(fileContents, file.name, filePath, commiter_ID)
+            }
+        }
+    }
+}
+
+def handleTfFile(fileContents, fileName, filePath, commiter_ID) {
+    def varTags = fileContents.findAll(/(?i)var\.tags/).unique()
+    def hasModulesOrResources = fileContents.contains("module") || fileContents.contains("resource")
+    def hasVariables = fileContents.contains("variable")
+
+    if (hasModulesOrResources) {
+        varTags.each {
+            fileContents = fileContents.replace(it, "merge(${it}, { CreatorID = \"${commiter_ID}\" })")
+        }
+        if (varTags.size() < fileContents.findAll(/(module|resource)/).size()) {
+            changeFileContents(/(?s)(?i)tags\s*=\s*\{[^}]*\}/, commiter_ID, fileContents, fileName, filePath)
+        } else {
+            writeFile(file: filePath, text: fileContents, encoding: pipelineConstants.msBuildPipelineConstants.DEFAULT_WEBCONFIG_ENCODING)
+        }
+    } else if (hasVariables) {
+        changeFileContents(/(?s)(?i)default\s*=\s*\{[^}]*\}/, commiter_ID, fileContents, fileName, filePath)
+    }
+}
+
+def changeFileContents(regex, commiter_ID, fileContents, fileName, filePath) {
+    def matches = fileContents.findAll(regex).unique()
+    if (!matches) {
+        println("No matches found for regex: ${regex} in file: ${fileName}")
+        return
+    }
+
+    def modifiedContents = matches.collect { block ->
+        def cleanedBlock = removeCreatorID(block)
+        if (cleanedBlock.startsWith("{")) {
+            "merge(${cleanedBlock}, { CreatorID = \"${commiter_ID}\" })"
+        } else {
+            cleanedBlock
+        }
+    }
+
+    matches.eachWithIndex { match, idx ->
+        fileContents = fileContents.replace(match, modifiedContents[idx])
+    }
+
+    println("Updated file contents for ${fileName}: ${fileContents}")
+    writeFile(file: filePath, text: fileContents, encoding: pipelineConstants.msBuildPipelineConstants.DEFAULT_WEBCONFIG_ENCODING)
+}
+
+def removeCreatorID(block) {
+    block.replaceAll(/CreatorID\s*=\s*".*?"\s*,?/, "").replaceAll(/,\s*}/, "}").trim()
+}
+def readReleaseConfigFile(config, String stage = "") {
+    def releaseConfigFile = "${env.WORKSPACE}/ReleaseConfigFile.json"
+    echo "release config : ${releaseConfigFile}"
+
+    if (!fileExists(releaseConfigFile)) error "Config file not found: ${releaseConfigFile}"
+
+    def data = new JsonSlurperClassic().parseText(readFile(releaseConfigFile))
+    def releaseEnvironments = data.component.integratedReleaseEnvironments ?: data.component.integratedConfigFileContent?.releases?.collect { it.integratedReleaseEnvironments }.flatten()
+
+    if (!releaseEnvironments?.size()) error "No valid release environments found."
+
+    releaseEnvironments.each { env ->
+        def envDetails = data.environments?.find { it.environmentName == env }
+        if (!envDetails) error "Environment ${env} not found."
+
+        assignConfigValues(config, envDetails)
+
+        if (validatePhaseConfig(config) && shouldProcessBranch(config)) {
+            handleStage(config, stage)
+        }
+    }
+
+    echo "Environments published: ${envPackaged}"
+}
+
+// Assign config values from environment details
+def assignConfigValues(config, envDetails) {
+    config.with {
+        env = envDetails.environmentName
+        phase = envDetails.phaseType
+        tfeworkspace = envDetails.tfeworkspaceName
+        tfeOrganization = envDetails.tfeOrgName
+        tfeInstance = envDetails.tfeInstanceEnvName ?: "PROD"
+        tfeurl = pipelineUtil.getPipelineDetails(config).tfeUrl
+    }
+}
+
+// Validate phase configuration
+def validatePhaseConfig(config) {
+    def validPhases = ["DEV", "LLE", "PROD"]
+    def validOrg = config.tfeOrganization.toUpperCase().contains(config.phase == "DEV" ? "DEV" : config.phase == "LLE" ? "UAT" : "PROD")
+
+    if (!validPhases.contains(config.phase.toUpperCase())) error "Invalid phase: ${config.phase}. Use [DEV, LLE, PROD]."
+    if (!validOrg) printErrLog("Invalid environment/phase combination for ${config.phase}.")
+    return validOrg
+}
+
+// Check if the current branch should process the environment
+def shouldProcessBranch(config) {
+    def branchName = pipelineUtil.script.env.BRANCH_NAME
+    return branchName.startsWith(pipelineConstants.FEATURE_BRANCH_NAME) || branchName == pipelineConstants.DEVELOP_BRANCH_NAME || branchName.startsWith(pipelineConstants.RELEASE_BRANCH_NAME)
+}
+
+// Handle the stage (either PACKAGE or other)
+def handleStage(config, stage) {
+    if (stage == pipelineConstants.stages.PACKAGE) packageStage(config)
+    else {
+        config.tfetoken = pipelineUtil.getTokenFromVault(config)
+        config.token.put(config.phase, "'${config.tfetoken}'")
+        publishConfigurationstage(config)
+        envPackaged.add(config.env)
+    }
+}
+ Define error messages map globally
+def errorMessages = [
+    "validateOrgAndProvider" : "Verify whether you have specified correct TFE org, provider, or Token details",
+    "getWorkspaceId" : "Verify whether you have specified the correct workspace name",
+    "buildConfigurationStage" : "Exception occurred while building configuration stage",
+    "publishConfigurationStage" : "Exception/Error: Publishing config files failed"
+]
+
+// Reusable HTTP Request function with error handling
+def httpRequestHelper(config, method, url, body = null, file = null, contentType = "application/vnd.api+json", methodName = "") {
+    def params = [
+        customHeaders: [
+            [name: "Authorization", value: "Bearer ${config.tfetoken}"],
+            [name: "Content-Type", value: contentType]
+        ],
+        httpMode: method,
+        url: url
+    ]
+
+    // Only add body or file if they are provided
+    if (body) params.requestBody = body
+    if (file) {
+        params.uploadFile = file
+        params.wrapAsMultipart = false  // Disable multipart wrapping for file uploads
+    }
+
+    try {
+        def response = httpRequest(params)
+        return response.content ? new JsonSlurper().parseText(response.content) : null
+    } catch (Exception e) {
+        printErrLog("${errorMessages[methodName] ?: 'Unknown error'}: ${e.toString()}")
+        throw e
+    }
+}
+
+// Helper function for logging error messages
+def printErrLog(message) {
+    println "[ERROR] ${message}"
+}
+
+// Method to validate Org and Provider
+def validateOrgAndProvider(config) {
+    def url = "${config.tfeurl}/api/v2/organizations/${config.tfeorganization}/registry-providers/private/${config.tfeorganization}/${config.provider}"
+    httpRequestHelper(config, 'GET', url, "", "", "application/vnd.api+json", "validateOrgAndProvider")
+}
+
+// Method to get Workspace ID
+def getWorkspaceId(config) {
+    validateOrgAndProvider(config)
+    def url = "${config.tfeurl}/api/v2/organizations/${config.tfeorganization}/workspaces/${config.tfeworkspace}"
+    return httpRequestHelper(config, 'GET', url, "", "", "application/vnd.api+json", "getWorkspaceId").data.id
+}
+
+// Method to build Configuration Stage
+def buildConfigurationStage(config) {
+    def workspaceId = getWorkspaceId(config)
+    def url = "${config.tfeurl}/api/v2/workspaces/${workspaceId}/configuration-versions"
+    def payload = '{"data":{"type":"configuration-versions","attributes":{"auto-queue-runs":false}}}'
+    return httpRequestHelper(config, 'POST', url, payload, "", "application/vnd.api+json", "buildConfigurationStage").data.attributes.'upload-url'
+}
+
+// Method to publish Configuration Stage
+def publishConfigurationStage(config) {
+    try {
+        httpRequestHelper(config, 'PUT', buildConfigurationStage(config), "", "${config.repo}.${config.env}.tar.gz", "application/octet-stream", "publishConfigurationStage")
+        logMetrics(config, "Config files successfully published")
+    } catch (Exception e) {
+        logMetrics(config, "Config file publish stage failed: ${e}", false)
+        printErrLog("Exception/Error: Publishing config files failed - ${e}")
+    }
+}
+
+// Logging metrics for pipeline
+def logMetrics(config, message, success = true) {
+    pipelineUtil.logMetrics(
+        config,
+        pipelineConstants.stages.PUBLISHCONFIGFILES,
+        config.stageTool,
+        message,
+        null,
+        success ? pipelineConstants.stageResults.success : pipelineConstants.stageResults.failure
+    )
+}
+
+
+
+
+// Logging metrics for pipeline
+def logMetrics(config, message, success = true) {
+    pipelineUtil.logMetrics(
+        pipelineConstants.stages.PUBLISHCONFIGFILES,
+        config.stageTool,
+        message,
+        null,
+        success ? pipelineConstants.stagesResults.success : pipelineConstants.stagesResults.failure
+    )
+}
+
+
+// Sonar Scan Stage
+def sonarScanStage(config) {
+    printLog("Stage - Sonar Scan", true)
+    // Passing binariesPath as null because it is not required in non-compiled pipelines
+    sonarPlugin(null, config, "")
+}
+
+def executeCustomCommand(command) {
+    if (isUnix()) {
+        pipelineUtil.executeCommand("${command}", true)
+    } else {
+        pipelineUtil.executeCommand("${command}", false)
+    }
+}
+
+  def scmDownloadStage(config, terraformAppIaCValidator) {
+        printLog("Stage - Source Control Download", true)
+        try {
+            scmCheckout(config, pipelineConstants.stages.SCM)
+        } catch (err) {
+            printErrLog("Exception/Error in SCM Checkout: ${err}")
+        }
+        terraformAppIaCValidator.validate(config)
+    }
