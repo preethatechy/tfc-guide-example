@@ -1,0 +1,85 @@
+package org.hz.core.apis
+
+import groovy.json.JsonSlurper
+import groovyx.net.http.RESTClient
+import org.hz.core.base.BaseApi
+import org.hz.core.base.CbjWrapper
+import org.hz.core.constants.PipelineConstants
+
+class VaultApi extends BaseApi {
+
+    VaultApi(CbjWrapper obj) {
+        super(obj)
+    }
+
+    def initialize() {
+        setBaseUrl(configHelper.getConfiguration(key: 'vaultUrl'))
+        headers["Authorization"] = "Bearer ${configHelper.getConfiguration(key: 'vaultToken')}"
+        headers["Content-Type"] = "application/json"
+        return this
+    }
+
+    // Method to get token from Vault
+    def getTokenFromVault(Map params) {
+        def vaultUrl = configHelper.getConfiguration(key: 'vaultUrl')
+        def vaultNamespace = configHelper.getConfiguration(key: 'vaultNamespace')
+        def vaultPath = configHelper.getConfiguration(key: 'vaultPath')
+        def roleId = ""
+        def vaultSecretId = ""
+        def vaultApiResponse = ""
+
+        try {
+            if (params.pipelineMetricsEvent.pipelineBuildType == "TerraformAppIaC") {
+                roleId = celestialPush.getAppConfigFromCelestial(params, "${params.ait}_TFE${params.tfeInstance.toUpperCase()}")
+                vaultSecretId = celestialPush.getAppConfigFromCelestial(params, "${params.ait}_TFE${params.tfeInstance.toUpperCase()}_SECRET")
+                debug("RoleId and SecretId fetched from Celestial")
+            }
+
+            // Vault authentication request
+            def authPayload = [role_id: roleId, secret_id: vaultSecretId]
+            def authResponse = post("/v1/auth/approle/login", [body: authPayload, headers: ["x-vault-namespace": vaultNamespace]])
+
+            def authToken = authResponse.data.auth.client_token
+
+            // Custom headers for accessing Vault
+            def customHeaders = ['Content-Type': 'application/json', 'X-Vault-Namespace': vaultNamespace]
+            def client = new RESTClient(vaultUrl)
+            client.headers['X-Vault-Token'] = authToken
+            client.headers.putAll(customHeaders)
+
+            // Fetch data from Vault
+            vaultApiResponse = client.get(path: vaultPath)
+
+            if (params.pipelineMetricsEvent.pipelineBuildType == "TerraformAppIaC") {
+                def envVal = "tokens/${params.tfeOrganization}/IAC/${params.ait}"
+                def tfeTokenResponse = vaultApiResponse.data.data."${envVal}"
+                debug("Workspace token fetched from Vault")
+                return tfeTokenResponse
+            }
+
+            return vaultApiResponse
+
+        } catch (Exception e) {
+            String errorMessage = "[ERROR] Vault API request failed: ${e.message}"
+            if (params.pipelineMetricsEvent.pipelineBuildType == "TerraformAppIaC") {
+                errorMessage = "[ERROR] Vault RoleId/vaultSecretId issue: ${e.message}"
+            }
+            debug(errorMessage)
+            throw e
+        }
+    }
+}
+
+
+
+
+def vaultApi = new VaultApi(someCbjWrapperInstance)
+vaultApi.initialize()
+
+// Get Token from Vault
+try {
+    def token = vaultApi.getTokenFromVault(params)
+    println "Vault Token: ${token}"
+} catch (Exception e) {
+    println "Error: ${e.message}"
+}
