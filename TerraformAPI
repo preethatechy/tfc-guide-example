@@ -1,0 +1,113 @@
+package org.hz.core.apis
+
+import groovyx.net.http.ContentType
+@Grab(group = 'org.codehaus.groovy.modules.http-builder', module = 'http-builder', version = '0.7.1')
+import org.hz.core.base.BaseApi
+import org.hz.core.base.CbjWrapper
+
+class TerraformApi extends BaseApi {
+
+    TerraformApi(CbjWrapper obj) {
+        super(obj)
+    }
+
+    // Initialize the base URL and headers for Terraform API
+    def initialize() {
+        setBaseUrl(configHelper.getConfiguration(key: 'tfeUrl'))
+        headers["Authorization"] = "Bearer " + configHelper.getConfiguration(key: 'tfetoken')
+        headers['Content-Type'] = 'application/vnd.api+json'
+        return this
+    }
+
+    // Validate Terraform Organization and Provider
+    def validateOrgAndProvider(String org, String provider) {
+        String path = "/api/v2/organizations/${org}/registry-providers/private/${org}/${provider}"
+        def response = get(path, [headers: ["Accept": "application/vnd.api+json"]])
+        return handleResponse(path, response, "Error validating organization and provider '${org}' with provider '${provider}'")
+    }
+
+    // Get Workspace ID
+    def getWorkspaceId(String org, String workspace) {
+        String path = "/api/v2/organizations/${org}/workspaces/${workspace}"
+        def response = get(path, [headers: ["Accept": "application/vnd.api+json"]])
+        return handleResponse(path, response, "Error retrieving workspace ID for '${workspace}' in organization '${org}'")?.data?.id
+    }
+
+    // Build Configuration Stage
+    def buildConfigurationStage(String org, String workspace) {
+        String workspaceId = getWorkspaceId(org, workspace)
+        String path = "/api/v2/workspaces/${workspaceId}/configuration-versions"
+        def payload = '{"data":{"type":"configuration-versions", "attributes":{"auto-queue-runs":false}}}'
+        def response = post(path, [body: payload])
+        return handleResponse(path, response, "Error building configuration stage for workspace '${workspace}'")?.data?.attributes?.'upload-url'
+    }
+
+    // Publish Configuration Stage
+    def publishConfigurationStage(String org, String workspace, String repo, String env) {
+        try {
+            String uploadUrl = buildConfigurationStage(org, workspace)
+            String path = uploadUrl
+            def file = "${repo}.${env}.tar.gz"
+            def response = put(path, [file: file, query: ["upload-url": uploadUrl]])
+            return handleResponse(path, response, "Error publishing configuration stage for workspace '${workspace}'")?.status
+        } catch (Exception e) {
+            printErrLog("Exception/Error: Publishing config files failed - ${e}")
+            throw e
+        }
+    }
+
+    // Handle the API response
+    def handleResponse(String path, response, String errorMessage) {
+        if (response.status >= 200 && response.status < 300) {
+            String ct = response.headers['Content-Type']
+            if (ct?.toLowerCase()?.contains('application/json')) {
+                return util.parseJsonText(response.getData())
+            }
+            return response
+        } else {
+            printErrLog("${errorMessage}: ${response?.status} - ${response?.getData()}")
+            throw new RuntimeException("API request failed for path: ${path}, Status: ${response?.status}")
+        }
+    }
+
+    // Helper function for logging error messages
+    def printErrLog(String message) {
+        println "[ERROR] ${message}"
+    }
+}
+
+
+
+def terraformApi = new TerraformApi(someCbjWrapperInstance)
+terraformApi.initialize()
+
+// Validate organization and provider
+try {
+    terraformApi.validateOrgAndProvider('myOrg', 'myProvider')
+} catch (Exception e) {
+    // Handle exception
+    println "Validation failed: ${e.message}"
+}
+
+// Get workspace ID
+try {
+    def workspaceId = terraformApi.getWorkspaceId('myOrg', 'myWorkspace')
+    println "Workspace ID: ${workspaceId}"
+} catch (Exception e) {
+    println "Error: ${e.message}"
+}
+
+// Build configuration stage and get upload URL
+try {
+    def uploadUrl = terraformApi.buildConfigurationStage('myOrg', 'myWorkspace')
+    println "Upload URL: ${uploadUrl}"
+} catch (Exception e) {
+    println "Error: ${e.message}"
+}
+
+// Publish configuration stage by uploading the config file
+try {
+    terraformApi.publishConfigurationStage('myOrg', 'myWorkspace', 'myRepo', 'dev')
+} catch (Exception e) {
+    println "Error: ${e.message}"
+}
