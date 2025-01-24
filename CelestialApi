@@ -1,0 +1,108 @@
+package org.hz.core.apis;
+
+import org.hz.core.utils.*;
+import org.hz.core.config.*;
+import groovy.json.JsonBuilder;
+import groovyx.net.http.HTTPBuilder;
+
+class CelestialApi extends BaseApi {
+
+    CelestialApi(CbjWrapper obj) {
+        super(obj);
+    }
+
+    def initialize() {
+        setBaseUrl(configHelper.getConfiguration(key: 'celestialUrl'));
+        headers["accept"] = "*/*";
+        headers["Authorization"] = "Basic " + mask(configHelper.getConfiguration(key: 'celestialEventToken'));
+        return this;
+    }
+
+    def defaultPublishInfo() {
+        def publishInfo = [
+            AIT                : util.getAit(),
+            SPK                : util.getSpk(),
+            ApplicationRepo    : util.getRepo(),
+            ApplicationBranch  : scm.getBranches()[0].getName().trim(),
+            BuildName          : util.getBuildInfo().getName(),
+            BuildNumber        : util.getBuildInfo().getNumber(),
+            BuildCreated       : util.getBuildInfo().getStartDate().getDateTimeString(),
+            PipelineName       : globalVars.pipelineName ?: '',
+            PipelineType       : 'CI'
+        ];
+        return publishInfo;
+    }
+
+    def publishBuildInfo(publishInfo) {
+        try {
+            def queryPath = "/api/eventinfo/buildinfo";
+            def jsonBody = JsonOutput.toJson(publishInfo);
+            def response = postAsync(queryPath, [body: [event: jsonBody]]);
+        } catch (ex) {
+            if (ex instanceof HttpResponseException) {
+                util.throwExp("Error in pushing the data to Celestial: " + ex.getResponse().getData(), ex);
+            } else {
+                util.throwExp("Error in pushing the data to Celestial: " + ex.getMessage(), ex);
+            }
+        }
+    }
+
+    def static getAppConfigFromCelestial(config, String keyname, String spkname, String componentName) {
+        def envname;
+        def celestialUrl = pipelineUtil.getConfiguration('celestialConfigUrl');
+        def celestialAppConfigUri = pipelineConstants.CELESTIAL_APP_CONFIG_URI;
+        def token = pipelineUtil.getConfiguration('celestialConfigToken');
+
+        pipelineUtil.printLog("INFO: CELESTIAL URL - $celestialUrl$celestialAppConfigUri", true);
+
+        // Determine the environment name
+        def releaseUrl = pipelineUtil.getConfiguration("releaseConfigBitbucketUrl");
+        envname = releaseUrl.contains('dif') ? "CIT" :
+                  releaseUrl.contains('qa') ? "UAT" :
+                  releaseUrl.contains('horizon') ? "CONT" : null;
+
+        if (!envname) {
+            pipelineUtil.printErrLog("ERROR: Unable to determine environment from releaseConfigBitbucketUrl.");
+            return null;
+        }
+
+        config.envname = envname;
+
+        try {
+            // Construct payload
+            def payload = new JsonBuilder([
+                ComponentName      : componentName,
+                User               : pipelineUtil.get_nbkid(config),
+                SPK                : spkname,
+                EnvName            : envname,
+                EnvSubGroupName    : ""
+            ]).toString();
+
+            pipelineUtil.printLog("Payload: $payload", true);
+
+            // Send HTTP POST request
+            def http = new HTTPBuilder(celestialUrl);
+            def result = http.post(
+                path    : celestialAppConfigUri,
+                body    : payload,
+                headers : [
+                    "Authorization"            : "Basic $token",
+                    "x-Origin"                 : celestialUrl.replace("app", ""),
+                    "Content-Type"             : "application/json; charset=utf-8",
+                    "Access-Control-Allow-Origin": "*"
+                ]
+            );
+
+            // Extract configuration value
+            def appConfigValue = result.AppConfig[0]?.Variables?.get(keyname);
+            if (!appConfigValue) {
+                throw new Exception("Variable '${keyname}' is either incorrect or does not exist in Celestial.");
+            }
+
+            return appConfigValue;
+        } catch (Exception e) {
+            pipelineUtil.printErrLog("Unable to retrieve configurations from Celestial: ${e.message}");
+            return null;
+        }
+    }
+}
