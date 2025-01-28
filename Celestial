@@ -1,0 +1,49 @@
+def getAppConfigFromCelestial(String keyname, String spkname, String componentName) {
+    try {
+        def queryPath = "/api/app-config"
+        def payload = [
+            ComponentName   : componentName,
+            User            : util.get_nbkid(),
+            SPK             : spkname,
+            EnvName         : determineEnvironment(),
+            EnvSubGroupName : ""
+        ]
+        def jsonBody = JsonOutput.toJson(payload)
+
+        def response = post(queryPath, [body: jsonBody])
+
+        if (response?.status >= 200 && response?.status < 300) {
+            def appConfig = util.parseJsonText(response.data)
+            def variables = appConfig?.AppConfig?.getAt(0)?.Variables
+            def appConfigValue = variables?.get(keyname)
+
+            if (!appConfigValue) {
+                throw new Exception("Variable '${keyname}' is incorrect or does not exist in celestial")
+            }
+
+            return appConfigValue
+        } else {
+            util.throwExp("Failed to retrieve configurations from Celestial. Status: ${response?.status}, Response: ${response?.data}")
+        }
+    } catch (ex) {
+        if (ex instanceof HttpResponseException) {
+            util.throwExp("Error in retrieving configurations from Celestial: " + ex.getResponse()?.getData(), ex)
+        } else {
+            util.throwExp("Error in retrieving configurations from Celestial: " + ex.getMessage(), ex)
+        }
+    }
+}
+
+private def determineEnvironment() {
+    def releaseUrl = configHelper.getConfiguration(key: 'releaseConfigBitbucketUrl')
+
+    if (releaseUrl.contains('dif')) {
+        return "CIT"
+    } else if (releaseUrl.contains('qa')) {
+        return "UAT"
+    } else if (releaseUrl.contains('horizon')) {
+        return "CONT"
+    } else {
+        return "UNKNOWN"
+    }
+}
