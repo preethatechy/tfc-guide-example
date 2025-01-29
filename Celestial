@@ -47,3 +47,63 @@ private def determineEnvironment() {
         return "UNKNOWN"
     }
 }
+
+
+
+
+
+def getAppConfigFromCelestial(String keyname, String spkname, String componentName) { 
+    try {
+        print("After getAppConfigFromCelestial")
+
+        def queryPath = C.CELESTIAL_APP_CONFIG_URI
+        print("Query Path: ${queryPath}")
+
+        def payload = [
+            ComponentName   : componentName,
+            UserSPK        : util.get_nbkid(),
+            SPK            : spkname,
+            EnvName        : determineEnvironment(),
+            EnvSubGroupName: determineEnvironment()
+        ]
+
+        def jsonBody = JsonOutput.toJson(payload)
+        print("JSON Body: ${jsonBody}")
+
+        // Ensure API URL is correct
+        def apiUrl = configHelper.getConfiguration(key: 'celestialUrl').replace("app", "") + queryPath
+        print("Final API URL: ${apiUrl}")
+
+        // Ensure headers are correctly passed
+        def response = post(queryPath, [
+            body   : jsonBody,
+            headers: [
+                "Authorization"                : "Basic " + mask(configHelper.getConfiguration(key: 'celestialEventToken')),
+                "x-Origin"                     : configHelper.getConfiguration(key: 'celestialUrl').replace("app", ""),
+                "Content-Type"                 : "application/json; charset=utf-8",
+                "Access-Control-Allow-Origin"  : "*"
+            ],
+            followRedirects: true // Ensures we follow the 302 redirect
+        ])
+
+        print("Response: ${response}")
+
+        // Check for valid response
+        if (response?.status >= 200 && response?.status < 300) {
+            def appConfig = util.parseJsonText(response.data)
+            def variables = appConfig?.AppConfig?.getAt(0)?.Variables
+            def appConfigValue = variables?.get(keyname)
+
+            if (!appConfigValue) {
+                throw new Exception("Variable '${keyname}' is incorrect or does not exist in Celestial")
+            }
+            return appConfigValue
+        } else {
+            throw new Exception("Failed to retrieve configurations. Status: ${response?.status}, Response: ${response?.data}")
+        }
+    } catch (Exception e) {
+        print("Error: ${e.message}")
+        throw e
+    }
+}
+
