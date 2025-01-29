@@ -107,3 +107,70 @@ def getAppConfigFromCelestial(String keyname, String spkname, String componentNa
     }
 }
 
+
+
+
+def getAppConfigFromCelestial(String keyname, String spkname, String componentName) { 
+    try {
+        print("After getAppConfigFromCelestial")
+
+        def queryPath = C.CELESTIAL_APP_CONFIG_URI
+        print("Query Path: ${queryPath}")
+
+        def payload = [
+            ComponentName   : componentName,
+            UserSPK        : util.get_nbkid(),
+            SPK            : spkname,
+            EnvName        : determineEnvironment(),
+            EnvSubGroupName: determineEnvironment()
+        ]
+
+        def jsonBody = JsonOutput.toJson(payload)
+        print("JSON Body: ${jsonBody}")
+
+        def apiUrl = configHelper.getConfiguration(key: 'celestialUrl').replace("app", "") + queryPath
+        print("Final API URL: ${apiUrl}")
+
+        def response = post(queryPath, [
+            body   : jsonBody,
+            headers: [
+                "Authorization"                : "Basic " + mask(configHelper.getConfiguration(key: 'celestialEventToken')),
+                "x-Origin"                     : configHelper.getConfiguration(key: 'celestialUrl').replace("app", ""),
+                "Content-Type"                 : "application/json; charset=utf-8",
+                "Access-Control-Allow-Origin"  : "*"
+            ],
+            followRedirects: true
+        ])
+
+        print("Raw Response: ${response}") // Debugging log
+
+        // **Fix: Extract response body correctly**
+        def responseData = response?.data
+        if (responseData instanceof InputStream) {
+            responseData = responseData.text // Convert stream to string
+        }
+
+        print("Response Data (String): ${responseData}") // Debugging log
+
+        // **Fix: Ensure JSON parsing handles errors**
+        def appConfig
+        try {
+            appConfig = util.parseJsonText(responseData)
+        } catch (Exception jsonError) {
+            throw new Exception("Failed to parse JSON: ${jsonError.message}, Raw Response: ${responseData}")
+        }
+
+        def variables = appConfig?.AppConfig?.getAt(0)?.Variables
+        def appConfigValue = variables?.get(keyname)
+
+        if (!appConfigValue) {
+            throw new Exception("Variable '${keyname}' is incorrect or does not exist in Celestial")
+        }
+        return appConfigValue
+
+    } catch (Exception e) {
+        print("Error: ${e.message}")
+        throw e
+    }
+}
+
