@@ -248,3 +248,74 @@ def getAppConfigFromCelestial(String keyname, String spkname, String componentNa
         throw e
     }
 }
+
+
+import groovy.json.JsonSlurper
+
+def getAppConfigFromCelestial(String keyname, String spkname, String componentName) { 
+    try {
+        print("After getAppConfigFromCelestial")
+
+        def queryPath = C.CELESTIAL_APP_CONFIG_URI
+        print("Query Path: ${queryPath}")
+
+        def payload = [
+            ComponentName   : componentName,
+            UserSPK        : util.get_nbkid(),
+            SPK            : spkname,
+            EnvName        : determineEnvironment(),
+            EnvSubGroupName: determineEnvironment()
+        ]
+
+        def jsonBody = JsonOutput.toJson(payload)
+        print("JSON Body: ${jsonBody}")
+
+        def apiUrl = configHelper.getConfiguration(key: 'celestialUrl').replace("app", "") + queryPath
+        print("Final API URL: ${apiUrl}")
+
+        def response = post(queryPath, [
+            body   : jsonBody,
+            headers: [
+                "Authorization"                : "Basic " + mask(configHelper.getConfiguration(key: 'celestialEventToken')),
+                "x-Origin"                     : configHelper.getConfiguration(key: 'celestialUrl').replace("app", ""),
+                "Content-Type"                 : "application/json; charset=utf-8",
+                "Access-Control-Allow-Origin"  : "*"
+            ],
+            followRedirects: true
+        ])
+
+        print("Response Status: ${response?.status}") // Debugging log
+        print("Raw Response Type: " + response?.data?.class) // Check type
+        print("Raw Response: " + response?.data) // Check actual content
+
+        // **Check if response is successful**
+        if (response?.status < 200 || response?.status >= 300) {
+            throw new Exception("Failed to retrieve configurations. Status: ${response?.status}, Response: ${response?.data}")
+        }
+
+        // **Parse response string into a JSON object**
+        def responseData = response?.data
+        def jsonParser = new JsonSlurper()
+        def parsedResponse = jsonParser.parseText(responseData) // Converts String to Map
+
+        print("Parsed JSON: " + parsedResponse)
+
+        // **Navigate JSON structure correctly**
+        def variablesMap = parsedResponse?.AppConfig?.getAt(0)?.Variables
+        print("Extracted Variables Map: " + variablesMap)
+
+        // **Extract the value of keyname**
+        def appConfigValue = variablesMap?.get(keyname)
+
+        if (!appConfigValue) {
+            throw new Exception("Variable '${keyname}' is incorrect or does not exist in Celestial")
+        }
+
+        return appConfigValue
+
+    } catch (Exception e) {
+        print("Error: ${e.message}")
+        throw e
+    }
+}
+
