@@ -660,3 +660,114 @@ class CelestialApi extends BaseApi {
     }
 }
 
+
+import groovy.json.JsonSlurper
+import groovy.json.JsonOutput
+
+class CelestialApi extends BaseApi {
+    def getAppConfigFromCelestial(String keyname, String spkname, String componentName) { 
+        try {
+            print("==> Entering getAppConfigFromCelestial()")
+
+            def queryPath = C.CELESTIAL_APP_CONFIG_URI
+            print("==> Query Path: ${queryPath}")
+
+            def payload = [
+                User            : util.get_nbkid(),
+                SPK             : spkname,
+                EnvName         : determineEnvironment(),
+                EnvSubGroupName : "zk5x2vc",
+                ComponentName   : componentName
+            ]
+
+            def jsonBody = JsonOutput.toJson(payload)
+            print("==> JSON Body: ${jsonBody}")
+
+            def response = post(queryPath, [
+                body    : jsonBody,
+                headers : [
+                    "Authorization"               : "Basic " + mask(configHelper.getConfiguration(key: 'ce')),
+                    "x-Origin"                    : configHelper.getConfiguration(key: 'celestialUrl').replace(),
+                    "Content-Type"                : "application/json; charset=utf-8",
+                    "Access-Control-Allow-Origin" : "*"
+                ],
+                followRedirects: true
+            ])
+
+            if (response == null) {
+                throw new Exception("==> ERROR: Response is null!")
+            }
+
+            print("==> Response Type: " + response.class)
+            print("==> Response Status: ${response?.status}")
+
+            if (response?.status < 200 || response?.status >= 300) {
+                throw new Exception("==> ERROR: API request failed with status: ${response?.status}")
+            }
+
+            // **Extract raw response data using multiple approaches**
+            def responseBody = response?.data ?: response?.getData() ?: response?.text ?: response.toString()
+            print("==> Raw Response Data Type: " + responseBody?.class)
+            print("==> Raw Response Data (Before Parsing): " + responseBody)
+
+            // **Ensure responseBody is a String**
+            if (!(responseBody instanceof String)) {
+                responseBody = responseBody.toString()
+            }
+
+            // **Fix Groovy Map-style to JSON format**
+            responseBody = responseBody.replaceAll('=','" : "').replaceAll(',', ',"').replaceAll('}', '"}').replaceAll('\\[', '[').replaceAll('\\]', ']')
+            print("==> Fixed JSON Format: " + responseBody)
+
+            // **Check if responseBody is valid JSON before parsing**
+            if (!responseBody.startsWith("{") && !responseBody.startsWith("[")) {
+                throw new Exception("==> ERROR: Response is not valid JSON! Raw response: " + responseBody)
+            }
+
+            // **Attempt JSON parsing**
+            def jsonParser = new JsonSlurper()
+            def parsedResponse
+            try {
+                parsedResponse = jsonParser.parseText(responseBody)
+            } catch (Exception e) {
+                print("==> ERROR: Failed to parse JSON! Error: " + e.message)
+                print("==> Raw Response Data (Parsing Failed): " + responseBody)
+                throw e
+            }
+
+            print("==> Parsed JSON: " + parsedResponse)
+
+            // **Extract Variables Map**
+            def appConfigList = parsedResponse?.AppConfig
+            print("==> Extracted AppConfig List: " + appConfigList)
+
+            if (!appConfigList || appConfigList.isEmpty()) {
+                throw new Exception("==> ERROR: AppConfig list is empty or null!")
+            }
+
+            def variablesMap = appConfigList.get(0)?.Variables
+            print("==> Extracted Variables Map: " + variablesMap)
+
+            if (!variablesMap) {
+                throw new Exception("==> ERROR: Variables map is empty or null!")
+            }
+
+            print("==> Available Keys in Variables: " + variablesMap.keySet())
+
+            // **Fetch the value using keyname**
+            def appConfigValue = variablesMap.get(keyname)
+
+            if (!appConfigValue) {
+                throw new Exception("Variable '${keyname}' is incorrect or does not exist in Celestial")
+            }
+
+            print("==> Retrieved Value for '${keyname}': " + appConfigValue)
+            return appConfigValue
+
+        } catch (Exception e) {
+            print("==> ERROR: " + e.message)
+            throw e
+        }
+    }
+}
+
