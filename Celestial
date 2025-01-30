@@ -475,3 +475,80 @@ class CelestialApi extends BaseApi {
 }
 
 
+import groovy.json.JsonSlurper
+import groovy.json.JsonOutput
+
+class CelestialApi extends BaseApi {
+    def getAppConfigFromCelestial(String keyname, String spkname, String componentName) { 
+        try {
+            print("==> Entering getAppConfigFromCelestial()")
+
+            def queryPath = C.CELESTIAL_APP_CONFIG_URI
+            print("==> Query Path: ${queryPath}")
+
+            def payload = [
+                User            : util.get_nbkid(),
+                SPK             : spkname,
+                EnvName         : determineEnvironment(),
+                EnvSubGroupName : "zk5x2vc",
+                ComponentName   : componentName
+            ]
+
+            def jsonBody = JsonOutput.toJson(payload)
+            print("==> JSON Body: ${jsonBody}")
+
+            def response = post(queryPath, [
+                body    : jsonBody,
+                headers : [
+                    "Authorization"               : "Basic " + mask(configHelper.getConfiguration(key: 'ce')),
+                    "x-Origin"                    : configHelper.getConfiguration(key: 'celestialUrl').replace(),
+                    "Content-Type"                : "application/json; charset=utf-8",
+                    "Access-Control-Allow-Origin" : "*"
+                ],
+                followRedirects: true
+            ])
+
+            if (response == null) {
+                throw new Exception("==> ERROR: Response is null!")
+            }
+
+            print("==> Response Type: " + response.class)
+            print("==> Response Status: ${response?.status}")
+
+            if (response?.status < 200 || response?.status >= 300) {
+                throw new Exception("==> ERROR: API request failed with status: ${response?.status}")
+            }
+
+            // **Check response data handling**
+            def responseBody = response?.data ?: response?.getData() ?: response.toString()
+            print("==> Raw Response Data Type: " + responseBody.class)
+            print("==> Raw Response Data: " + responseBody)
+
+            // **Parse JSON string response**
+            def jsonParser = new JsonSlurper()
+            def parsedResponse = jsonParser.parseText(responseBody) // Convert String to JSON Object
+
+            print("==> Parsed JSON: " + parsedResponse)
+
+            // **Extract Variables Map**
+            def variablesMap = parsedResponse?.AppConfig?.getAt(0)?.Variables
+            print("==> Extracted Variables Map: " + variablesMap)
+
+            // **Fetch the value using keyname**
+            def appConfigValue = variablesMap?.get(keyname)
+
+            if (!appConfigValue) {
+                throw new Exception("Variable '${keyname}' is incorrect or does not exist in Celestial")
+            }
+
+            print("==> Retrieved Value for '${keyname}': " + appConfigValue)
+            return appConfigValue
+
+        } catch (Exception e) {
+            print("==> ERROR: " + e.message)
+            throw e
+        }
+    }
+}
+
+
