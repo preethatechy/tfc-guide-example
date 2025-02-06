@@ -1,0 +1,451 @@
+The provided code appears to be a Jenkins pipeline script written in Groovy for continuous integration/continuous delivery (CI/CD) automation. It integrates with various tools and services like OpenShift, Checkmarx, Mattermost, and others to perform actions during different stages of the pipeline.
+
+Here’s a quick overview of key components and stages in the pipeline:
+
+1. Pipeline Structure
+The script is designed around the BasePipeline class, which extends CbjWrapper and implements Serializable to be used in Jenkins pipeline.
+Various methods handle the pipeline execution, from initializing settings to managing stages such as SCM (Source Code Management), build, test, scan, and deployment.
+2. Key Methods
+execute(): The main method that runs the pipeline, initializing settings, validating parameters, executing stages, and handling errors.
+executeStages(): Handles the execution of multiple pipeline stages like SCM download, scanning, build, and more, iterating over agent lists.
+sendEmailNotification() and sendMattermostNotification(): These methods send notifications when the build completes or encounters errors, either through email or Mattermost.
+3. Stages
+SCM: Source Code Management, fetching the code from the repository.
+Build: Executes the build process, often using OpenShift or custom scripts.
+Security Scans: Includes integration with Checkmarx for security scans, compliance scans, and other scanning tools like Aqua for OpenShift images.
+Unit Testing: Executes unit tests, with a fail-fast option.
+Deploy: Deploys the artifacts to the relevant environments, with the ability to trigger dependent jobs.
+4. Integration with Tools
+Checkmarx: For security scans in the CHECKMARX_SCAN stage.
+Mattermost: Sends notifications about build results to a Mattermost channel.
+OpenShift: Builds and scans container images as part of the OpenShift-related stages (OPENSHIFT_BUILD and OPENSHIFT_SCAN).
+XLR Plugin: Handles the release locking mechanism for deployment.
+5. Error Handling
+The pipeline contains error-handling logic that catches exceptions, logs failures, and sends notifications when failures occur, ensuring that the pipeline does not silently fail.
+6. Customization and Parameterization
+The pipeline supports many customizable parameters such as enabling/disabling specific stages, fail-fast behavior, and notification configurations.
+It also includes methods like validateInputParams() to check the correctness of input parameters before proceeding.
+
+
+
+
+
+
+
+
+1. Imports and Class Declaration
+groovy
+Copy
+Edit
+import org.hz.core.common.Checkmarx
+import org.hz.core.common.Compliance
+import org.hz.core.common.OpenshiftUtil
+import org.hz.core.constants.Stages
+import org.hz.core.common.SharedPipelineVars
+import org.hz.core.common.EnterpriseSecurityUtil
+import org.hz.core.constants.PipelineConstants as C
+import org.hz.core.apis.MattermostApi
+import org.hz.core.apis.CelestialApi
+import org.hz.core.common.XlrPluginUtil
+import org.hz.core.common.ParamConverterUtil
+import org.hz.core.constants.OpenshiftBuildStatergy as OS
+These are imports of various classes and constants. They represent utility classes, tools, and configurations used throughout the pipeline script.
+Checkmarx, Compliance, OpenshiftUtil, EnterpriseSecurityUtil, etc., are utility classes to interact with tools like Checkmarx (for security scanning), OpenShift (for building and deploying container images), and more.
+2. Abstract Class Definition (BasePipeline)
+groovy
+Copy
+Edit
+abstract class BasePipeline extends CbjWrapper implements Serializable {
+BasePipeline is an abstract class that extends CbjWrapper (likely a custom wrapper class) and implements Serializable.
+Serializable allows the class to be saved and restored for distributed execution (likely Jenkins agents).
+3. Class Members
+groovy
+Copy
+Edit
+BaseValidator validator
+String pipelineType = "CI"
+BaseValidator: This is an object of the BaseValidator class that is likely responsible for validating the pipeline configuration and inputs.
+pipelineType: A string property set to "CI" indicating that this pipeline is of type Continuous Integration.
+4. Constructor
+groovy
+Copy
+Edit
+BasePipeline(cbj, params) {
+    super(cbj, params)
+}
+Constructor: The constructor takes cbj and params as arguments, which are passed to the superclass CbjWrapper. This suggests that cbj is likely a Jenkins currentBuild object and params are the pipeline parameters.
+5. Main Execution Method (execute)
+groovy
+Copy
+Edit
+def execute() {
+    try {
+        timestamps {
+            setInitialValues()
+            util.validateJobCallingItself()
+            onInitialize()
+            onAfterInitialize()
+            validateInputParams()
+            validateAndParameterizeJobs()
+            executeStages()
+        }
+    } catch (Exception err) {
+        handleError(err)
+    }
+}
+timestamps { ... }: A Jenkins pipeline block that adds timestamps to the log output.
+setInitialValues(): Initializes various pipeline parameters and configurations.
+util.validateJobCallingItself(): Likely checks that the pipeline is being triggered in the expected manner.
+onInitialize() and onAfterInitialize(): These are custom methods for initializing the pipeline.
+validateInputParams(): Ensures that the input parameters are valid.
+validateAndParameterizeJobs(): Validates and parameterizes any jobs that are part of the pipeline.
+executeStages(): This is the method that handles the execution of all stages of the pipeline.
+handleError(): Handles any errors that may occur during the execution.
+6. setInitialValues Method
+groovy
+Copy
+Edit
+def setInitialValues() {
+    initiateWrapper()
+    this.validator = new BaseValidator(this)
+    
+    if (params.help == null) {
+        params.help = true
+    }
+
+    applySettingsFromParentPipeline()
+    globalVars.convertedParams = util.deepCopy(params)
+}
+initiateWrapper(): Initializes the wrapper functionality (likely related to the CbjWrapper class).
+this.validator = new BaseValidator(this): Creates a new instance of BaseValidator for validating pipeline configurations.
+params.help = true: If the help parameter is not provided, it defaults to true.
+applySettingsFromParentPipeline(): Applies configurations from a parent pipeline if this pipeline is a child.
+globalVars.convertedParams = util.deepCopy(params): Copies the parameters deeply to globalVars to be used later in the pipeline.
+7. executeStages Method (Stage Execution)
+groovy
+Copy
+Edit
+def executeStages() {
+    boolean isError = false
+    try {
+        def agents = validator.createStageList()
+        globalVars.pipeline_status = false
+        debug("Agents: ${agents}")
+        
+        Integer agentCnt = 0
+        for (entry in agents) {
+            debug("Item: ${entry}")
+            String agent = entry.agent
+
+            node(agent) {
+                def workspace = util.getWorkSpace()
+                debug("Workspace: ${workspace}")
+
+                ws(workspace) {
+                    try {
+                        if (agentCnt == 0) {
+                            deleteDir()
+                            util.getTimeStampForMetrics()
+                            pipelineCycleEvent(C.CYCLE_START, C.CYCLE_START_MSG)
+                        }
+
+                        if (agentCnt != 0 || globalVars.runAsChildPipeline) {
+                            deleteDir()
+                            cbj.unstash 'context'
+                            globalVars.runAsChildPipeline = false
+                        }
+validator.createStageList(): Calls the createStageList method from the BaseValidator class, which likely returns a list of stages to be executed.
+agents: This contains the list of agents that will execute the pipeline stages.
+node(agent): Runs the following block on a specific Jenkins node (agent).
+ws(workspace): Specifies a workspace for the agent to use during this block.
+deleteDir(): Cleans up the workspace by deleting existing files.
+pipelineCycleEvent(): Likely logs the start of the pipeline cycle for monitoring purposes.
+8. Executing Specific Stages
+groovy
+Copy
+Edit
+for (String stageName in entry.stages) {
+    globalVars.stageName = stageName
+    globalVars.agent = agent
+    util.getTimeStampForMetrics()
+
+    stage(util.getPipelineSpecificStageName()) {
+        print("====")
+        print("Stage Name: ${stageName} running on Label: ${agent} & Node: ${env.NODE_NAME}")
+        print("====")
+        switch (stageName) {
+            case Stages.SCM:
+                ScmDownloadWrapper(stageName)
+                break
+            case Stages.ESPSECURITY_SCAN:
+                espScanStageWrapper(stageName)
+                break
+            case Stages.CHECKMARX_SCAN:
+                checkmarxScanStageWrapper(stageName)
+                break
+            case Stages.PREBUILD:
+                preBuildStageWrapper(stageName)
+                break
+            case Stages.BUILD:
+                buildStageWrapper(stageName)
+                break
+            case Stages.UNITTEST:
+                unitTestStageWrapper(stageName)
+                break
+            case Stages.MLIF_SERVICE_GENERATION:
+                mlifServiceGenerationWrapper(stageName)
+                break
+            case Stages.POSTBUILD:
+                postBuildStageWrapper(stageName)
+                break
+            case Stages.PACKAGE:
+                packageStageWrapper(stageName)
+                break
+            case Stages.ARTIFACT:
+                publishStageWrapper(stageName)
+                break
+            case Stages.COMPLIANCE_SCAN:
+                executeComplianceScanWrapper(stageName)
+                break
+            case Stages.TRIGGER_DEPENDENT_JOBS:
+                triggerDependentJobsWrapper(stageName)
+                break
+            case Stages.SCAN:
+                scanStageWrapper(stageName)
+                break
+            case Stages.OPENSHIFT_BUILD:
+                openShiftBuildStageWrapper(stageName)
+                break
+            case Stages.OPENSHIFT_SCAN:
+                openShiftImageScanStagWrapper(stageName)
+                break
+            case Stages.DEPLOY:
+                deployStageWrapper(stageName)
+                break
+            default:
+                error "Invalid Stage"
+        }
+    }
+}
+Stages Execution: The pipeline runs each stage listed for the agent.
+switch(stageName): A switch statement is used to determine which method to call for each stage based on the stageName.
+Each case corresponds to a different stage, such as SCM, BUILD, UNITTEST, COMPLIANCE_SCAN, etc.
+9. Publishing Results and Notifications
+groovy
+Copy
+Edit
+if (agentCnt < agents.size()) {
+    if ((!params.publish_mode && params.publish_enableScmTag) || params.scan_enable) {
+        cbj.stash name: 'context', useDefaultExcludes: false
+    } else {
+        cbj.stash 'context'
+    }
+} else if (agentCnt == agents.size()) {
+    if (params.publish_enable) {
+        debug("Push the build info into Celestial")
+        def cp = new CelestialApi(this).initialize()
+        def artifactDetails = util.getArtifactoryDetails()
+        def publishInfo = cp.defaultPublishInfo()
+
+        for (artifactdetail in artifactDetails) {
+            publishInfo.ArtifactName = artifactdetail.name ?: 'Unknown'
+            publishInfo.ArtifactVersion = artifactdetail.version ?: 'Unknown'
+            publishInfo.ArtifactPath = artifactdetail.path ?: 'Unknown'
+            cp.publishBuildInfo(publishInfo)
+        }
+    }
+    // Send notifications if enabled
+    if (params.notificationDG) sendEmailNotification()
+    if (params.mattermostUrl) sendMattermostNotification()
+}
+Stashing Context: The pipeline uses the stash command to save files for later use in the pipeline.
+Publishing Build Information: If the publish flag is enabled, the build information is pushed to Celestial (via the CelestialApi).
+Notifications: Emails and Mattermost messages are sent if the respective flags (notificationDG, mattermostUrl) are enabled.
+10. Error Handling and Cleanup
+groovy
+Copy
+Edit
+} catch (Exception e) {
+    util.throwExp(error: "Error in ${globalVars.stageName} stage.", e)
+} finally {
+    pipelineCycleEvent(C.CYCLE_END, C.CYCLE_END_MSG, globalVars.stageName)
+    if (params.cleanWorkspace) {
+        cleanWorkspace()
+    }
+}
+Error Handling: If any error occurs in a stage, it is caught, and an exception is thrown with a relevant message.
+**finally block
+
+
+
+
+
+1. server = getServerInfo() & buildInfo = util.getBuildInfo()
+groovy
+Copy
+Edit
+def server = getServerInfo()
+def buildInfo = util.getBuildInfo()
+getServerInfo(): Likely a method that retrieves information about the server where the build is running. This could return details such as server name, version, or other configuration specifics.
+util.getBuildInfo(): This is a utility method that collects details about the build, such as build number, build status, or metadata about the current build.
+2. Publishing Artifacts and Information
+groovy
+Copy
+Edit
+debug("Calling publishMethod")
+publishMethod(server, buildInfo, extraProps)
+debug("publishMethod called successfully")
+
+debug("buildInfo: ${buildInfo}")
+server.publishBuildInfo(buildInfo)
+publishMethod(server, buildInfo, extraProps): This method publishes the build information (buildInfo) to a server or service. It might involve pushing build data to a system like Celestial, Artifactory, or another artifact repository.
+server.publishBuildInfo(buildInfo): After calling publishMethod, this line ensures that the server object publishes the build information (buildInfo) using its publishBuildInfo method.
+3. Git Tagging (Commented Out)
+groovy
+Copy
+Edit
+createAndPushGitTagToRemote()
+This line invokes the method createAndPushGitTagToRemote(), which is responsible for creating and pushing Git tags to a remote repository. However, the actual command to push the tag is commented out, so it won't execute unless uncommented.
+4. Publish to DMZ
+groovy
+Copy
+Edit
+if (params.publish_dmz) {
+    debug("publish_dmz flag is true")
+    util.publishDMZ(util.getPublishRepo())
+}
+params.publish_dmz: Checks if the publish_dmz flag is true in the pipeline parameters.
+util.publishDMZ(): If the flag is set, this method publishes the artifacts or data to a DMZ (DeMilitarized Zone), which is a network area often used for external access to the internal network, such as serving public assets.
+5. Error Handling
+groovy
+Copy
+Edit
+} catch (err) {
+    util.throwExp(error: "Publish Artifact failed", err)
+}
+If any error occurs during the artifact publishing process, it is caught and passed to the util.throwExp() method. This method likely logs the error and possibly rethrows it or handles it according to the pipeline's error-handling configuration.
+6. createAndPushGitTagToRemote() Method
+groovy
+Copy
+Edit
+def createAndPushGitTagToRemote() {
+    def gitUrl = scm.getUserRemoteConfigs()[0].getUrl()
+    def jenkinsCred = util.getCredential(C.COMMITER_JENKINS_CREDS_ID)
+
+    gitUrl = gitUrl.replace("https://", "https://${jenkinsCred.userName}:${jenkinsCred.password}@")
+scm.getUserRemoteConfigs()[0].getUrl(): Retrieves the Git remote URL from the Jenkins SCM configuration. This URL is the address of the Git repository.
+util.getCredential(C.COMMITER_JENKINS_CREDS_ID): This method retrieves the Jenkins credentials for the committer, which are used for Git operations.
+gitUrl.replace("https://", "https://${jenkinsCred.userName}:${jenkinsCred.password}@"): Replaces the URL's "https://" prefix with a version that includes the username and password from the Jenkins credentials. This allows the Git operations to authenticate using the committer's credentials.
+Git Tagging Operations
+groovy
+Copy
+Edit
+if (params.publish_enableLocalGitTagToRemote) {
+    def git = cbj.tool name: 'Default', type: 'git'
+
+    def gitTagCommands = "$git config --local user.name \"${C.COMMITER_USER_NAME}\" && $git config --local user.email \"${C.COMMITER_EMAIL_ID}\" && $git push ${gitUrl} --tags"
+    util.executeCommand(gitTagCommands)
+}
+params.publish_enableLocalGitTagToRemote: This checks whether the flag for enabling local Git tagging is set in the pipeline parameters.
+cbj.tool name: 'Default', type: 'git': This retrieves the Git tool installed on the Jenkins node.
+util.executeCommand(gitTagCommands): This method executes the shell command that configures the Git user and pushes the local tags to the remote Git repository.
+Release Branch Git Tagging
+groovy
+Copy
+Edit
+if (params.publish_enableScmTag && env.BRANCH_NAME.startsWith(C.RELEASE_BRANCH_PREFIX)) {
+    def gitTag = scm.getBranches()[0].getName() + " ${env.BUILD_NUMBER}"
+    def gitTagMsg = "Automatically tagged for Release"
+    def git = cbj.tool name: 'Default', type: 'git'
+
+    git = "\"$git\""
+
+    def gitTagCommands = "$git config --local user.name \"${C.COMMITER_USER_NAME}\" && $git config --local user.email \"${C.COMMITER_EMAIL_ID}\" && $git tag -a ${gitTag} -m \"${gitTagMsg}\" && $git push ${gitUrl} --tags"
+    try {
+        if (params.customCheckoutDir != null) {
+            cbj.dir("${params.customCheckoutDir}") {
+                util.executeCommand(gitTagCommands)
+            }
+        } else {
+            util.executeCommand(gitTagCommands)
+        }
+    } catch (e) {
+        warn("Failed to create tag due to error: ${e}")
+    }
+}
+params.publish_enableScmTag: Checks if the publish_enableScmTag flag is enabled.
+env.BRANCH_NAME.startsWith(C.RELEASE_BRANCH_PREFIX): Checks if the branch name starts with a release branch prefix.
+scm.getBranches()[0].getName(): Gets the branch name for tagging.
+$git tag -a ${gitTag} -m \"${gitTagMsg}\": Creates a Git tag using the branch name and build number.
+util.executeCommand(gitTagCommands): Executes the Git tag command in the appropriate directory.
+7. applySettingsFromParentPipeline()
+groovy
+Copy
+Edit
+def applySettingsFromParentPipeline() {
+    try {
+        if (params.enablePipelineChaining || SharedPipelineVars.parentPipelineParams?.enablePipelineChaining) {
+            SharedPipelineVars.pipelineCount++
+        }
+
+        if (SharedPipelineVars.parentPipelineParams?.enablePipelineChaining) {
+            globalVars.runAsChildPipeline = true
+            globalVars.isChildPipeline = true
+            globalVars.stageCommands = SharedPipelineVars.stageCommands
+            SharedPipelineVars.stageCommands = null
+
+            if (params.inheritParentPipelineParams) {
+                debug("parentParams ${SharedPipelineVars.parentPipelineParams}")
+                debug("childParams ${params}")
+                SharedPipelineVars.parentPipelineParams.enablePipelineChaining = false
+                params = SharedPipelineVars.parentPipelineParams + params
+                debug("Merged Params ${params}")
+            }
+
+            SharedPipelineVars.parentPipelineParams = null
+        }
+    } catch (err) {
+        util.throwExp("Unable to stash:" + err, err)
+    }
+}
+Pipeline Chaining: This method handles logic for chained pipelines (parent-child relationships between pipelines).
+params.enablePipelineChaining: Checks if pipeline chaining is enabled.
+SharedPipelineVars: A shared variable object that holds data between parent and child pipelines.
+The method merges parent and child pipeline parameters and ensures that the pipeline chaining flag is properly managed.
+8. applySettingsForChildPipeline()
+groovy
+Copy
+Edit
+def applySettingsForChildPipeline() {
+    try {
+        if (params.enablePipelineChaining) {
+            debug("Saving parents params for child")
+
+            SharedPipelineVars.parentPipelineParams = params
+            SharedPipelineVars.stageCommands = globalVars.stageCommands
+            cbj.stash name: 'context', useDefaultExcludes: false
+        }
+    } catch (err) {
+        util.throwExp(error: "Unable to stash: ${err}", err)
+    }
+}
+SharedPipelineVars.parentPipelineParams: This saves the child pipeline's parameters for future reference or to pass them to another pipeline.
+9. deployStageWrapper(stage) and onDeployStage(stage)
+groovy
+Copy
+Edit
+def deployStageWrapper(stage) {
+    onDeployStage(stage)
+}
+
+def onDeployStage(stage) {
+    def xlrUtil: XlrPluginUtil = new XlrPluginUtil(this).initialize()
+    xlrUtil.triggerXlrReleaseProcess()
+    return
+}
+deployStageWrapper(stage): A wrapper method for the deployment stage.
+onDeployStage(stage): This method triggers an XLR (XebiaLabs Release) process, likely initiating a release workflow.
+Summary
+This script handles various tasks, including publishing build information, managing Git tags, and dealing with pipeline chaining (parent-child pipelines).
+It uses several utility methods (util.executeCommand, util.getBuildInfo, util.publishDMZ, etc.) for executing commands and interacting with the environment.
+It also handles error management and stashing data for child pipelines, ensuring that the flow between different stages and pipelines is properly managed.
