@@ -1,0 +1,38 @@
+  +----------------+       +--------------------+       +------------------+
+  |   Jenkins      |       |   XL Release API   |       |   Bitbucket      |
+  +----------------+       +--------------------+       +------------------+
+           |                        |                          |
+           |  Trigger Deployment    |                          |
+           |----------------------->|                          |
+           |                        |                          |
+           |       Fetch Build Name |                          |
+           |<-----------------------|                          |
+           |                        |                          |
+           |       Get Release Info |                          |
+           |----------------------->|                          |
+           |                        |                          |
+           |     Extract Title, SCM Branch, Components         |
+           |<-----------------------|                          |
+           |                        |                          |
+           |   Update Release Title  |                          |
+           |----------------------->|                          |
+           |                        |                          |
+           |  Check if Build Exists  |                          |
+           |----------------------->|                          |
+           |                        |                          |
+           |  If No Build -> Exit   |                          |
+           |                        |                          |
+           |  If Build Exists: Update Release Title, SCM Branch  |
+           |----------------------->|                          |
+           |                        |                          |
+           |   Enable Splunk Logging (if configured)           |
+           |----------------------->|                          |
+           |                        |                          |
+           |   Start Deployment Process                      |
+           |----------------------->|                          |
+           |                        |                          |
+           |    Log Details to Splunk                         |
+           |----------------------->|                          |
+           |                        |                          |
+           |        Deployment Done  |                          |
+           |<-----------------------|                          |
