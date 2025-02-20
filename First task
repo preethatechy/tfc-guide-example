@@ -69,3 +69,20 @@
            |                               |                               |
            | 7. Complete                   |                               |
            |------------------------------>|                               |
+
+
+
+This script checks if a build exists and, if so, extracts and formats release details (including branch and build numbers), updates the XL Release title accordingly, and logs data to Splunk; if no build is found, it flags the release as having no build and exits.
+
+Below is a brief explanation of the script:
+	•	Purpose: The script synchronizes critical deployment variables from a release template to the current release configuration.
+	•	Process:
+	1.	It retrieves the template’s variables and the current release’s variables.
+	2.	It then extracts values for key variables such as releaseConfigFileRepoLocation, towerDeployerPasswordNonProd, and towerDeployerPasswordProd from the template.
+	3.	Next, it loops through the current release variables, updating any missing or empty ones with the corresponding values from the template.
+	4.	If the releaseConfigFileRepoLocation variable is not configured, the script exits with an error.
+	•	Outcome: The script ensures that essential configuration details are present and correctly set for the deployment process by updating the release via the release API.
+
+
+
+
