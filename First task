@@ -36,3 +36,36 @@
            |                        |                          |
            |        Deployment Done  |                          |
            |<-----------------------|                          |
+
+
+
+
+
+
++---------------------+        +--------------------+         +----------------------+
+| Current Release    |        | Template API      |         | Release API          |
++---------------------+        +--------------------+         +----------------------+
+           |                               |                               |
+           | 1. Get Template ID            |                               |
+           |------------------------------>|                               |
+           |                               |                               |
+           | 2. Fetch Template Variables   |                               |
+           |------------------------------>|                               |
+           |                               |                               |
+           | 3. Fetch Release Variables    |                               |
+           |-------------------------------------------------------------->|
+           |                               |                               |
+           | 4. Loop Through Template Vars |                               |
+           |                               |                               |
+           | - Store Required Variables    |                               |
+           |                               |                               |
+           | 5. Loop Through Release Vars  |                               |
+           |                               |                               |
+           | - Update if Missing           |                               |
+           | - Error if Config Not Found   |                               |
+           |                               |                               |
+           | 6. Update Release Variables   |                               |
+           |-------------------------------------------------------------->|
+           |                               |                               |
+           | 7. Complete                   |                               |
+           |------------------------------>|                               |
