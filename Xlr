@@ -1,0 +1,32 @@
+        for item3 in deploymentGroups:
+            test_tasks = []  # List to store test tasks per environment
+            deploy_tasks = []  # List to store deploy tasks per environment
+
+            for compName in item3:
+                merge_task = taskApi.searchTasksByTitle("Deploy changes for the environment", compName[0], current_release.id)[0]
+
+                if "test" in compName[0].lower():  # Check if it's a test task
+                    test_tasks.append(merge_task)  # Store test tasks separately
+                else:
+                    deploy_tasks.append(merge_task)  # Store deploy tasks separately
+
+            # Add test tasks before the parallel group
+            for test_task in test_tasks:
+                copied_test_task = taskApi.copyTask(test_task.id, current_task.id, len(current_task.getTasks()))
+                copied_test_task.title = "Execute test for " + test_task.title.replace("Deploy changes for the environment", "").strip()
+                taskApi.updateTask(copied_test_task)
+                taskApi.delete(test_task.id)  # Remove original test task
+
+            # Create the Parallel Group after test tasks
+            group_task = taskApi.newTask("xlrelease.ParallelGroup")
+            group_task.title = "Parallel Execution " + str(groupCounter)
+            taskApi.addTask(current_task.id, group_task)
+
+            # Add deploy tasks to the parallel group
+            for deploy_task in deploy_tasks:
+                copied_task = taskApi.copyTask(deploy_task.id, group_task.id, len(group_task.getTasks()))
+                copied_task.title = "Deploy changes to " + deploy_task.title.replace("Deploy changes for the environment", "").strip()
+                taskApi.updateTask(copied_task)
+                taskApi.delete(deploy_task.id)  # Remove original deploy task
+
+            groupCounter += 1
