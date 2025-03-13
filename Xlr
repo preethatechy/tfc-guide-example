@@ -31,6 +31,14 @@ while counter <= len(releaseVariables['grpDeploymentSequence_dev']):
 
 print(deployOrderaftercleanup)
 
+# Identify the main task where we will add everything
+main_task = taskApi.searchTasksByTitle("Deploy changes/build", phaseName, current_release.id)[0]
+
+# Create a global Sequential Group for all "Tower changes" at the beginning
+global_tower_sequential_group = taskApi.newTask("xlrelease.SequentialGroup")
+global_tower_sequential_group.title = "Global Sequential Tower Changes"
+taskApi.addTask(main_task.id, global_tower_sequential_group)
+
 # Grouping the cleaned list for parallel and sequential deployment
 for item1 in deployOrderaftercleanup:
     newlist = item1.split(";")
@@ -58,7 +66,6 @@ for item1 in deployOrderaftercleanup:
             deploymentGroups.append(list(group))
 
         groupCounter = 1
-        current_task = taskApi.searchTasksByTitle("Deploy changes/build", phaseName, current_release.id)[0]
 
         for item3 in deploymentGroups:
             tower_tasks = []  # Store "Tower changes" tasks
@@ -74,22 +81,17 @@ for item1 in deployOrderaftercleanup:
                 deploy_task = taskApi.searchTasksByTitle("Deploy changes for the environment", compName[0], current_release.id)[0]
                 deploy_tasks.append(deploy_task)
 
-            # Create Sequential Group for "Tower changes" tasks
-            if tower_tasks:
-                sequential_group = taskApi.newTask("xlrelease.SequentialGroup")
-                sequential_group.title = "Sequential Tower Changes " + str(groupCounter)
-                taskApi.addTask(current_task.id, sequential_group)
-
-                for tower_task in tower_tasks:
-                    copied_tower_task = taskApi.copyTask(tower_task.id, sequential_group.id, len(sequential_group.getTasks()))
-                    copied_tower_task.title = "Tower changes for " + tower_task.title.replace("Tower changes to the environment", "").strip()
-                    taskApi.updateTask(copied_tower_task)
-                    taskApi.delete(tower_task.id)  # Remove original task
+            # Add all Tower changes tasks to the global sequential group
+            for tower_task in tower_tasks:
+                copied_tower_task = taskApi.copyTask(tower_task.id, global_tower_sequential_group.id, len(global_tower_sequential_group.getTasks()))
+                copied_tower_task.title = "Tower changes for " + tower_task.title.replace("Tower changes to the environment", "").strip()
+                taskApi.updateTask(copied_tower_task)
+                taskApi.delete(tower_task.id)  # Remove original task
 
             # Create Parallel Group for Deploy tasks
             group_task = taskApi.newTask("xlrelease.ParallelGroup")
             group_task.title = "Parallel Execution " + str(groupCounter)
-            taskApi.addTask(current_task.id, group_task)
+            taskApi.addTask(main_task.id, group_task)
 
             # Add "Deploy changes for the environment" tasks inside parallel execution group
             for deploy_task in deploy_tasks:
