@@ -1,4 +1,3 @@
-
 from itertools import groupby
 import re
 
@@ -75,14 +74,19 @@ for item1 in deployOrderaftercleanup:
                 deploy_task = taskApi.searchTasksByTitle("Deploy changes for the environment", compName[0], current_release.id)[0]
                 deploy_tasks.append(deploy_task)
 
-            # Add "Tower changes to the environment" tasks sequentially before parallel execution
-            for tower_task in tower_tasks:
-                copied_tower_task = taskApi.copyTask(tower_task.id, current_task.id, len(current_task.getTasks()))
-                copied_tower_task.title = "Tower changes for " + tower_task.title.replace("Tower changes to the environment", "").strip()
-                taskApi.updateTask(copied_tower_task)
-                taskApi.delete(tower_task.id)  # Remove original task
+            # Create Sequential Group for "Tower changes" tasks
+            if tower_tasks:
+                sequential_group = taskApi.newTask("xlrelease.SequentialGroup")
+                sequential_group.title = "Sequential Tower Changes " + str(groupCounter)
+                taskApi.addTask(current_task.id, sequential_group)
 
-            # Add Parallel group for deploy tasks
+                for tower_task in tower_tasks:
+                    copied_tower_task = taskApi.copyTask(tower_task.id, sequential_group.id, len(sequential_group.getTasks()))
+                    copied_tower_task.title = "Tower changes for " + tower_task.title.replace("Tower changes to the environment", "").strip()
+                    taskApi.updateTask(copied_tower_task)
+                    taskApi.delete(tower_task.id)  # Remove original task
+
+            # Create Parallel Group for Deploy tasks
             group_task = taskApi.newTask("xlrelease.ParallelGroup")
             group_task.title = "Parallel Execution " + str(groupCounter)
             taskApi.addTask(current_task.id, group_task)
