@@ -31,25 +31,12 @@ while counter <= len(releaseVariables['grpDeploymentSequence_dev']):
 
 print(deployOrderaftercleanup)
 
-# Identify the main task where we will add everything
-main_task = taskApi.searchTasksByTitle("Deploy changes/build", phaseName, current_release.id)[0]
-
-# Create a global Sequential Group for all "Tower changes" at the beginning
-global_tower_sequential_group = taskApi.newTask("xlrelease.SequentialGroup")
-global_tower_sequential_group.title = "Global Sequential Tower Changes"
-taskApi.addTask(main_task.id, global_tower_sequential_group)
-
-# Grouping the cleaned list for parallel and sequential deployment
+# Process each cleaned deployment sequence
 for item1 in deployOrderaftercleanup:
     newlist = item1.split(";")
-    phaseName = ""
 
-    for eachrow in newlist:
-        if eachrow.split(":")[0] == phase.title:
-            phaseName = phase.title
-
-    if phaseName == "":
-        phaseName = newlist[0].split(":")[0]
+    # Initialize phaseName properly
+    phaseName = newlist[0].split(":")[0]
 
     if len(newlist) != 0:
         listoflists = []
@@ -66,6 +53,18 @@ for item1 in deployOrderaftercleanup:
             deploymentGroups.append(list(group))
 
         groupCounter = 1
+
+        # Get the main deployment task
+        main_task = taskApi.searchTasksByTitle("Deploy changes/build", phaseName, current_release.id)
+        if not main_task:
+            raise Exception(f"Task 'Deploy changes/build' not found for phase: {phaseName}")
+
+        main_task = main_task[0]  # Get the first match
+
+        # Create a global Sequential Group for all "Tower changes" at the beginning
+        global_tower_sequential_group = taskApi.newTask("xlrelease.SequentialGroup")
+        global_tower_sequential_group.title = "Global Sequential Tower Changes"
+        taskApi.addTask(main_task.id, global_tower_sequential_group)
 
         for item3 in deploymentGroups:
             tower_tasks = []  # Store "Tower changes" tasks
