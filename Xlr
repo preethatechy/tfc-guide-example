@@ -51,28 +51,29 @@ for item1 in deployOrderaftercleanup:
         groupCounter = 1
         current_task = taskApi.searchTasksByTitle("Deploy changes/build", phaseName, current_release.id)[0]
 
+        # 1. Create a Tower Sequential Execution Group at the beginning
+        tower_sequential_task = taskApi.newTask("xlrelease.SequentialGroup")
+        tower_sequential_task.title = "Tower Sequential Execution"
+        taskApi.addTask(current_task.id, tower_sequential_task)
+
+        # Add Tower changes for all environments in sequence
         for item3 in deploymentGroups:
-            # 1. Create a Parallel Execution Group
-            parallel_group_task = taskApi.newTask("xlrelease.ParallelGroup")
-            parallel_group_task.title = "Parallel Execution " + str(groupCounter)
-            taskApi.addTask(current_task.id, parallel_group_task)
-
-            # 2. Inside Parallel Execution, create a Sequential Tower Group
-            sequential_tower_task = taskApi.newTask("xlrelease.SequentialGroup")
-            sequential_tower_task.title = "Tower Sequential - " + str(groupCounter)
-            taskApi.addTask(parallel_group_task.id, sequential_tower_task)
-
-            # Add Tower changes in sequence
             for compName in item3:
                 tower_task_results = taskApi.searchTasksByTitle("Tower changes for the environment", compName[0], current_release.id)
                 if tower_task_results:
                     tower_task = tower_task_results[0]
-                    copied_tower_task = taskApi.copyTask(tower_task.id, sequential_tower_task.id, len(sequential_tower_task.getTasks()))
+                    copied_tower_task = taskApi.copyTask(tower_task.id, tower_sequential_task.id, len(tower_sequential_task.getTasks()))
                     copied_tower_task.title = "Tower changes for " + compName[0]
                     taskApi.updateTask(copied_tower_task)
-                    taskApi.delete(tower_task.id)
+                    taskApi.delete(tower_task.id)  # Remove original task
 
-            # 3. Inside Parallel Execution, create Deploy changes in parallel
+        # 2. Create Parallel Execution Groups after Tower Sequential
+        for item3 in deploymentGroups:
+            parallel_group_task = taskApi.newTask("xlrelease.ParallelGroup")
+            parallel_group_task.title = "Parallel Execution " + str(groupCounter)
+            taskApi.addTask(current_task.id, parallel_group_task)
+
+            # Add Deploy changes in parallel
             for compName in item3:
                 deploy_task_results = taskApi.searchTasksByTitle("Deploy changes for the environment", compName[0], current_release.id)
                 if deploy_task_results:
@@ -80,7 +81,7 @@ for item1 in deployOrderaftercleanup:
                     copied_deploy_task = taskApi.copyTask(deploy_task.id, parallel_group_task.id, len(parallel_group_task.getTasks()))
                     copied_deploy_task.title = "Deploy changes to " + compName[0]
                     taskApi.updateTask(copied_deploy_task)
-                    taskApi.delete(deploy_task.id)
+                    taskApi.delete(deploy_task.id)  # Remove original task
 
             groupCounter += 1
 
