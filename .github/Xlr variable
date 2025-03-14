@@ -134,3 +134,55 @@ for key, item in releaseVariables['grpDeployment Sequence_dev'].items():
                 if isVariableUpdated:
                     taskApi.updateTask(item1)
                     print(item1)
+
+
+Release Trigger → taskApi: Search tasks by title
+taskApi → Release Trigger: Returns matching tasks
+
+Release Trigger → taskApi: Get containers (containerid_0 & containerid_1)
+
+loop For each container
+    Release Trigger → container: Get child tasks
+
+    loop For each task (item1)
+        Release Trigger → item1: Check title and replace variables
+        Release Trigger → item1: Check script and replace variables
+        Release Trigger → item1: Check input properties and replace passwords/tokens
+
+        alt If variable was updated
+            Release Trigger → taskApi: Update task
+            taskApi → Release Trigger: Task updated
+        end
+    end
+end
+
+mermaid 
+
+sequenceDiagram
+    participant Release_Trigger
+    participant taskApi
+    participant Container_0
+    participant Container_1
+    participant Task_Item1
+    participant Python_Script
+
+    Release_Trigger ->> taskApi: Search tasks by title
+    taskApi -->> Release_Trigger: Return matching tasks
+
+    Release_Trigger ->> taskApi: Get containers (containerid_0 & containerid_1)
+
+    loop For each container (containerid_0, containerid_1)
+        Release_Trigger ->> Container_0: Get child tasks
+        Release_Trigger ->> Container_1: Get child tasks
+
+        loop For each task (item1)
+            Release_Trigger ->> Task_Item1: Check title and replace variables
+            Release_Trigger ->> Task_Item1: Check script and replace variables
+            Release_Trigger ->> Python_Script: Check input properties (passwords/tokens)
+
+            alt If variable was updated
+                Release_Trigger ->> taskApi: Update task
+                taskApi -->> Release_Trigger: Task updated
+            end
+        end
+    end
