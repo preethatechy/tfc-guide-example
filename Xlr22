@@ -1,0 +1,118 @@
+from itertools import groupby
+import re
+
+current_release = getCurrentRelease()
+
+# Cleaning the phases with 0 order
+deployOrderaftercleanup = []
+stringOfList = ""
+counter = 1
+
+while counter <= len(releaseVariables['grpDeploymentSequence_dev']):
+    for key, item in releaseVariables['grpDeploymentSequence_dev'].items():
+        groupingOrder = item.split('-')
+
+        if int(groupingOrder[0]) == 0:
+            cleanup_phase = phaseApi.searchPhases(key, current_release.id, None)
+            if len(cleanup_phase) != 0:
+                phaseApi.deletePhase(cleanup_phase[0].id)
+
+        elif int(groupingOrder[0]) == counter:
+            if len(stringOfList) != 0:
+                stringOfList = stringOfList + ";" + key + ":" + item
+            else:
+                stringOfList = key + ":" + item
+
+    if len(stringOfList) != 0:
+        deployOrderaftercleanup.append(stringOfList)
+
+    counter += 1
+    stringOfList = ""
+
+print(deployOrderaftercleanup)
+
+# Process each cleaned deployment sequence
+for item1 in deployOrderaftercleanup:
+    newlist = item1.split(";")
+    phaseName = newlist[0].split(":")[0]  # Initialize phase name properly
+
+    if len(newlist) != 0:
+        listoflists = []
+        for item2 in newlist:
+            listoflists.append(item2.split(':'))
+
+        listoflists.sort(key=lambda x: x[1])
+        print(listoflists)
+
+        deploymentGroups = []
+        for key, group in groupby(listoflists, lambda x: x[1]):
+            deploymentGroups.append(list(group))
+
+        groupCounter = 1
+        current_task = taskApi.searchTasksByTitle("Deploy changes/build", phaseName, current_release.id)[0]
+
+        # 1. Create a Tower Sequential Execution Group at the beginning
+        tower_sequential_task = taskApi.newTask("xlrelease.SequentialGroup")
+        tower_sequential_task.title = "Tower Sequential Execution"
+        taskApi.addTask(current_task.id, tower_sequential_task)
+
+        # Add Tower changes for all environments in sequence
+        for item3 in deploymentGroups:
+            for compName in item3:
+                tower_task_results = taskApi.searchTasksByTitle("Tower changes for the environment", compName[0], current_release.id)
+                if tower_task_results:
+                    tower_task = tower_task_results[0]
+                    copied_tower_task = taskApi.copyTask(tower_task.id, tower_sequential_task.id, len(tower_sequential_task.getTasks()))
+                    copied_tower_task.title = "Tower changes for " + compName[0]
+                    taskApi.updateTask(copied_tower_task)
+
+                    # **Modify Subtasks Inside Tower Task (Only if it's a group task)**
+                    if hasattr(copied_tower_task, 'getTasks'):
+                        for sub_task in copied_tower_task.getTasks():
+                            sub_task.title += " - " + compName[0]  # Append environment name
+                            taskApi.updateTask(sub_task)
+
+                            # **Modify Nested Subtasks (Only if it's a group task)**
+                            if hasattr(sub_task, 'getTasks'):
+                                for nested_sub_task in sub_task.getTasks():
+                                    nested_sub_task.title += " - " + compName[0]
+                                    taskApi.updateTask(nested_sub_task)
+
+                    taskApi.delete(tower_task.id)  # Remove original task
+
+        # 2. Create Parallel Execution Groups after Tower Sequential
+        for item3 in deploymentGroups:
+            parallel_group_task = taskApi.newTask("xlrelease.ParallelGroup")
+            parallel_group_task.title = "Parallel Execution " + str(groupCounter)
+            taskApi.addTask(current_task.id, parallel_group_task)
+
+            # Add Deploy changes in parallel
+            for compName in item3:
+                deploy_task_results = taskApi.searchTasksByTitle("Deploy changes for the environment", compName[0], current_release.id)
+                if deploy_task_results:
+                    deploy_task = deploy_task_results[0]
+                    copied_deploy_task = taskApi.copyTask(deploy_task.id, parallel_group_task.id, len(parallel_group_task.getTasks()))
+                    copied_deploy_task.title = "Deploy changes to " + compName[0]
+                    taskApi.updateTask(copied_deploy_task)
+                    taskApi.delete(deploy_task.id)  # Remove original task
+
+            groupCounter += 1
+
+        # Merge phase update
+        merged_phase = phaseApi.searchPhases(phaseName, current_release.id, None)
+
+        for eachPhase in merged_phase:
+            if eachPhase.title == phaseName:
+                eachPhase.title = releaseVariables['delivery_environment_type'] + "- Group " + str(deployOrderaftercleanup.index(item1) + 1)
+                phaseApi.updatePhase(eachPhase)
+
+# Delete the environment-specific phases that have been grouped
+for key, item4 in releaseVariables['grpDeploymentSequence_dev'].items():
+    phase_to_clean = phaseApi.searchPhases(key, current_release.id, None)
+
+    for eachPhaseToDelete in phase_to_clean:
+        if eachPhaseToDelete.title == key:
+            phaseApi.deletePhase(eachPhaseToDelete.id)
+
+# Set the flag so the same grouping does not execute in other phases
+releaseVariables['isGrpDeploymentSequencingExecuted_dev'] = True
