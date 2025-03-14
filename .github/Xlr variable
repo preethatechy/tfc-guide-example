@@ -1,4 +1,4 @@
-### Replace the common vars with environment-specific ones
+### Replace the common vars with environment specific ones
 for key, item in releaseVariables['grpDeployment Sequence_dev'].items():
     deployTaskName = 'Deploy ' + '${' + 'artifactoryBuildName' + '}'
     preDeployTaskName = "Execute Pre deploy tower job template"
@@ -7,10 +7,9 @@ for key, item in releaseVariables['grpDeployment Sequence_dev'].items():
     taskReference = "Set Variables for Deployment Sequencing"
     parallelDeployTaskName = 'ParallelDeploy ' + '${' + 'artifactoryBuildName' + '}'
     
-    phaseTitle = getCurrentPhase().title
-
     containerid_0 = None
     containerid_1 = None
+    phaseTitle = getCurrentPhase().title
 
     if key in phaseTitle and " (" in phaseTitle:
         phaseData = phaseTitle.split(" (")
@@ -47,28 +46,6 @@ for key, item in releaseVariables['grpDeployment Sequence_dev'].items():
                         item1.title = taskName
                         isVariableUpdated = True
 
-                    ### Replace passwords and authentication tokens
-                    itemforStore = []
-                    for item2 in item1.pythonScript.getInputProperties():
-                        pluginInputTextboxLabelOriginalValue = str(item2).split('.')[-1]
-                        pluginInputTextboxOriginalValue = item1.pythonScript.getProperty(pluginInputTextboxLabelOriginalValue)
-
-                        if 'taskPassword' in str(item2):
-                            if item1.title in [deployTaskName, preDeployTaskName, postDeployTaskName, createTemplateTaskName, parallelDeployTaskName]:
-                                item1.pythonScript.setProperty('taskPassword', "${global.towerArtifactoryPassword}")
-                                isVariableUpdated = True
-                        elif 'password' in str(item2):
-                            if item1.title in [deployTaskName, preDeployTaskName, postDeployTaskName, createTemplateTaskName, parallelDeployTaskName]:
-                                item1.pythonScript.setProperty('password', "${nonprod_tower_deployer_password}")
-                                isVariableUpdated = True
-                        elif 'password' not in str(item2) and pluginInputTextboxLabelOriginalValue == "token":
-                            itemforStore = item2
-                        if pluginInputTextboxLabelOriginalValue == "authenticationMethod" and pluginInputTextboxOriginalValue == "PAT" and itemforStore:
-                            item1.pythonScript.setProperty('password', "")
-                            item1.pythonScript.setProperty('token', "${global.crossConnectIDTokenNonProd}")
-                            itemforStore = []
-                            isVariableUpdated = True
-
                     ### Replace the script task variables
                     if "xlrelease.ScriptTask" in str(item1.getType()):
                         scriptInTask = item1.script
@@ -78,6 +55,49 @@ for key, item in releaseVariables['grpDeployment Sequence_dev'].items():
                             scriptInTask = scriptInTask.replace(releaseValuePattern, newValuePattern)
                             item1.script = scriptInTask
                             isVariableUpdated = True
+
+                    ### Replace the non-script task variables
+                    if "xlrelease.SequentialGroup" not in str(item1.getType()) and "xlrelease.ParallelGroup" not in str(item1.getType()):
+                        inputFieldValue = ""
+
+                        ### Replace the input variables
+                        for item2 in item1.pythonScript.getInputProperties():
+                            varNameFromTask = str(item2).split('.')[-1]
+                            if 'password' not in str(item2):
+                                inputFieldValue = item1.pythonScript.getProperty(varNameFromTask)
+                                if isinstance(inputFieldValue, unicode) and newVariableName not in inputFieldValue and eachVariableName in inputFieldValue:
+                                    inputFieldValue = inputFieldValue.replace(releaseValuePattern, newValuePattern)
+                                    item1.pythonScript.setProperty(varNameFromTask, inputFieldValue)
+                                    isVariableUpdated = True
+
+                                elif isinstance(inputFieldValue, list):
+                                    mylist = []
+                                    for eachValue in inputFieldValue:
+                                        if releaseValuePattern in eachValue:
+                                            inputFieldValueReplaced = eachValue.replace(releaseValuePattern, newValuePattern)
+                                        else:
+                                            inputFieldValueReplaced = eachValue
+                                        mylist.append(inputFieldValueReplaced)
+                                    item1.pythonScript.setProperty(varNameFromTask, mylist)
+                                    isVariableUpdated = True
+
+                    ### Replace the variables in Failure Handler
+                    failureHandlerInTask = item1.failureHandler
+                    if isinstance(failureHandlerInTask, unicode) and newVariablePattern not in failureHandlerInTask and newValuePattern not in failureHandlerInTask and eachVariableName in failureHandlerInTask:
+                        failureHandlerInTask = failureHandlerInTask.replace(releaseVariablePattern1, newVariablePattern)
+                        failureHandlerInTask = failureHandlerInTask.replace(releaseVariablePattern2, newVariablePattern)
+                        failureHandlerInTask = failureHandlerInTask.replace(releaseValuePattern, newValuePattern)
+                        item1.failureHandler = failureHandlerInTask
+                        isVariableUpdated = True
+
+                    ### Replace the variables in precondition
+                    preconditionInTask = item1.precondition
+                    if isinstance(preconditionInTask, unicode) and newVariablePattern not in preconditionInTask and newValuePattern not in preconditionInTask and eachVariableName in preconditionInTask:
+                        preconditionInTask = preconditionInTask.replace(releaseVariablePattern1, newVariablePattern)
+                        preconditionInTask = preconditionInTask.replace(releaseVariablePattern2, newVariablePattern)
+                        preconditionInTask = preconditionInTask.replace(releaseValuePattern, newValuePattern)
+                        item1.precondition = preconditionInTask
+                        isVariableUpdated = True
 
                     ### Replace the Output Variables
                     for key3, item3 in releaseVariables['ResultVariablesInTask'].items():
@@ -100,6 +120,16 @@ for key, item in releaseVariables['grpDeployment Sequence_dev'].items():
                                 newOutputVariable2 = '$' + '{' + mylist[2] + '_' + key + '}'
                                 item1.variableMapping = {'pythonScript.result': newOutputVariable, 'pythonScript.result2': newOutputVariable1, 'pythonScript.result3': newOutputVariable2}
                                 isVariableUpdated = True
+
+                ### Replace password
+                if "xlrelease.SequentialGroup" not in str(item1.getType()) and "xlrelease.ParallelGroup" not in str(item1.getType()) and "xlrelease.ScriptTask" not in str(item1.getType()):
+                    for item2 in item1.pythonScript.getInputProperties():
+                        if 'taskPassword' in str(item2):
+                            item1.pythonScript.setProperty('taskPassword', "${global.towerArtifactoryPassword}")
+                            isVariableUpdated = True
+                        elif 'password' in str(item2):
+                            item1.pythonScript.setProperty('password', "${nonprod_tower_deployer_password}")
+                            isVariableUpdated = True
 
                 if isVariableUpdated:
                     taskApi.updateTask(item1)
