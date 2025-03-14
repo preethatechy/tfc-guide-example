@@ -1,0 +1,26 @@
+Deploy changes/build
+│
+├── Tower Sequential Execution ✅  (Created only once)
+│   ├── Tower changes for Env A
+│   │   ├── Subtask 1 - Env A
+│   │   │   ├── Nested Subtask 1.1 - Env A
+│   │   │   ├── Nested Subtask 1.2 - Env A
+│   │   ├── Subtask 2 - Env A
+│   │   │   ├── Nested Subtask 2.1 - Env A
+│   │   │   ├── Nested Subtask 2.2 - Env A
+│   │
+│   ├── Tower changes for Env B
+│   │   ├── Subtask 1 - Env B
+│   │   │   ├── Nested Subtask 1.1 - Env B
+│   │   │   ├── Nested Subtask 1.2 - Env B
+│   │   ├── Subtask 2 - Env B
+│   │   │   ├── Nested Subtask 2.1 - Env B
+│   │   │   ├── Nested Subtask 2.2 - Env B
+│
+├── Parallel Execution 1 ✅
+│   ├── Deploy changes to Env A
+│   ├── Deploy changes to Env B
+│
+├── Parallel Execution 2 ✅
+│   ├── Deploy changes to Env X
+│   ├── Deploy changes to Env Y
