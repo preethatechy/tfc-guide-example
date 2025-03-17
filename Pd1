@@ -1,0 +1,38 @@
+import re  
+
+### Replace the script task variables
+if "xlrelease.ScriptTask" in str(item1.getType()):
+    scriptInTask = item1.script
+
+    # Replace standard release variables
+    if newVariablePattern not in scriptInTask and newValuePattern not in scriptInTask and eachVariableName in scriptInTask:
+        scriptInTask = scriptInTask.replace(releaseVariablePattern1, newVariablePattern)
+        scriptInTask = scriptInTask.replace(releaseVariablePattern2, newVariablePattern)
+        scriptInTask = scriptInTask.replace(releaseValuePattern, newValuePattern)
+        item1.script = scriptInTask
+        isVariableUpdated = True
+
+    # ✅ Ensure 'setVariable' exists before applying regex
+    if "setVariable('" in scriptInTask:
+        try:
+            def replace_setVariable(match):
+                variable_name = match.group(1).strip()  # Capture first argument inside setVariable()
+                if not variable_name:
+                    return match.group(0)  # Return unchanged if empty
+                new_variable = f"{variable_name}_{key}"  # Append environment key
+                return f"setVariable('{new_variable}',"
+
+            # 🔹 Updated regex pattern to match `setVariable('ANY_VALUE', var1)`
+            updatedScript = re.sub(
+                r"setVariable\(\s*'([^']+)'\s*,",  # Match single-quoted first argument
+                replace_setVariable,
+                scriptInTask
+            )
+
+            # Update only if changes were made
+            if updatedScript != scriptInTask:
+                item1.script = updatedScript
+                isVariableUpdated = True
+        
+        except Exception as e:
+            print(f"⚠️ Error while updating setVariable calls: {e}")  # Debugging output
