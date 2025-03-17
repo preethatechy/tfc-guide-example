@@ -1,0 +1,144 @@
+for key, item in releaseVariables['grpDeployment Sequence_dev'].items():
+    deployTaskName = 'Deploy ' + '${' + 'artifactoryBuildName' + '}'
+    preDeployTaskName = "Execute Pre deploy tower job template"
+    postDeployTaskName = "Execute Post deploy tower job template"
+    createTemplateTaskName = "Create Tower Job Template"
+    taskReference = "Set Variables for Deployment Sequencing"
+    parallelDeployTaskName = 'ParallelDeploy ' + '${' + 'artifactoryBuildName' + '}'
+    
+    containerid_0 = None
+    containerid_1 = None
+    phaseTitle = getCurrentPhase().title
+
+    if key in phaseTitle and " (" in phaseTitle:
+        phaseData = phaseTitle.split(" (")
+        if phaseData[0] == key:
+            taskContainers = taskApi.searchTasksByTitle(taskReference, phaseTitle, getCurrentRelease().id)
+        else:
+            taskContainers = taskApi.searchTasksByTitle(taskReference, key, getCurrentRelease().id)
+    else:
+        taskContainers = taskApi.searchTasksByTitle(taskReference, key, getCurrentRelease().id)
+
+    if len(taskContainers) > 1:
+        containerid_0 = taskContainers[0].container
+        containerid_1 = taskContainers[1].container
+    elif len(taskContainers) == 1:
+        containerid_0 = taskContainers[0].container
+
+    for containerid in [containerid_0, containerid_1]:
+        if containerid:
+            for item1 in containerid.getChildren():
+                print "For Environment", key, "associating vars in ", item1.title
+                isVariableUpdated = False
+
+                for eachVariableName in releaseVariables['group_deploy_var_lst']:
+                    releaseVariablePattern1 = "['" + eachVariableName + "']"
+                    releaseVariablePattern2 = '["' + eachVariableName + '"]'
+                    releaseValuePattern = '$' + '{' + eachVariableName + '}'
+                    newVariablePattern = "['" + eachVariableName + "_" + key + "']"
+                    newValuePattern = '$' + '{' + eachVariableName + '_' + key + '}'
+                    newVariableName = eachVariableName + "_" + key
+
+                    ### Update variables in task title
+                    if eachVariableName in item1.title:
+                        taskName = (item1.title).replace(eachVariableName, newVariableName)
+                        item1.title = taskName
+                        isVariableUpdated = True
+
+                    ### Replace the script task variables
+                    if "xlrelease.ScriptTask" in str(item1.getType()):
+                        scriptInTask = item1.script
+                        
+                        # Update setVariable method with environment-specific value
+                        pattern = r"setVariable\('([^']+)','([^']+)'\)"
+                        matches = re.finditer(pattern, scriptInTask)
+
+                        for match in matches:
+                            # Extract variable name and append environment suffix
+                            variable_name = match.group(1)
+                            updated_variable_name = f"{variable_name}_{key}"  # Add environment-specific suffix
+
+                            # Replace the old variable name with the new one
+                            scriptInTask = scriptInTask.replace(match.group(1), updated_variable_name)
+
+                        item1.script = scriptInTask
+                        isVariableUpdated = True
+
+                    ### Replace the non-script task variables
+                    if "xlrelease.SequentialGroup" not in str(item1.getType()) and "xlrelease.ParallelGroup" not in str(item1.getType()):
+                        inputFieldValue = ""
+
+                        ### Replace the input variables
+                        for item2 in item1.pythonScript.getInputProperties():
+                            varNameFromTask = str(item2).split('.')[-1]
+                            if 'password' not in str(item2):
+                                inputFieldValue = item1.pythonScript.getProperty(varNameFromTask)
+                                if isinstance(inputFieldValue, unicode) and newVariableName not in inputFieldValue and eachVariableName in inputFieldValue:
+                                    inputFieldValue = inputFieldValue.replace(releaseValuePattern, newValuePattern)
+                                    item1.pythonScript.setProperty(varNameFromTask, inputFieldValue)
+                                    isVariableUpdated = True
+
+                                elif isinstance(inputFieldValue, list):
+                                    mylist = []
+                                    for eachValue in inputFieldValue:
+                                        if releaseValuePattern in eachValue:
+                                            inputFieldValueReplaced = eachValue.replace(releaseValuePattern, newValuePattern)
+                                        else:
+                                            inputFieldValueReplaced = eachValue
+                                        mylist.append(inputFieldValueReplaced)
+                                    item1.pythonScript.setProperty(varNameFromTask, mylist)
+                                    isVariableUpdated = True
+
+                    ### Replace the variables in Failure Handler
+                    failureHandlerInTask = item1.failureHandler
+                    if isinstance(failureHandlerInTask, unicode) and newVariablePattern not in failureHandlerInTask and newValuePattern not in failureHandlerInTask and eachVariableName in failureHandlerInTask:
+                        failureHandlerInTask = failureHandlerInTask.replace(releaseVariablePattern1, newVariablePattern)
+                        failureHandlerInTask = failureHandlerInTask.replace(releaseVariablePattern2, newVariablePattern)
+                        failureHandlerInTask = failureHandlerInTask.replace(releaseValuePattern, newValuePattern)
+                        item1.failureHandler = failureHandlerInTask
+                        isVariableUpdated = True
+
+                    ### Replace the variables in precondition
+                    preconditionInTask = item1.precondition
+                    if isinstance(preconditionInTask, unicode) and newVariablePattern not in preconditionInTask and newValuePattern not in preconditionInTask and eachVariableName in preconditionInTask:
+                        preconditionInTask = preconditionInTask.replace(releaseVariablePattern1, newVariablePattern)
+                        preconditionInTask = preconditionInTask.replace(releaseVariablePattern2, newVariablePattern)
+                        preconditionInTask = preconditionInTask.replace(releaseValuePattern, newValuePattern)
+                        item1.precondition = preconditionInTask
+                        isVariableUpdated = True
+
+                    ### Replace the Output Variables
+                    for key3, item3 in releaseVariables['ResultVariablesInTask'].items():
+                        mylist = item3.split(",")
+                        newOutputVariable = '$' + '{' + mylist[0] + '_' + key + '}'
+
+                        if item1.title == key3:
+                            if item1.title in [deployTaskName, preDeployTaskName, postDeployTaskName, parallelDeployTaskName]:
+                                item1.variableMapping = {"pythonScript.jobId": newOutputVariable}
+                                isVariableUpdated = True
+                            elif len(mylist) == 1:
+                                item1.variableMapping = {'pythonScript.result': newOutputVariable}
+                                isVariableUpdated = True
+                            elif len(mylist) == 2:
+                                newOutputVariable1 = '$' + '{' + mylist[1] + '_' + key + '}'
+                                item1.variableMapping = {'pythonScript.result': newOutputVariable, 'pythonScript.result2': newOutputVariable1}
+                                isVariableUpdated = True
+                            elif len(mylist) == 3:
+                                newOutputVariable1 = '$' + '{' + mylist[1] + '_' + key + '}'
+                                newOutputVariable2 = '$' + '{' + mylist[2] + '_' + key + '}'
+                                item1.variableMapping = {'pythonScript.result': newOutputVariable, 'pythonScript.result2': newOutputVariable1, 'pythonScript.result3': newOutputVariable2}
+                                isVariableUpdated = True
+
+                ### Replace password
+                if "xlrelease.SequentialGroup" not in str(item1.getType()) and "xlrelease.ParallelGroup" not in str(item1.getType()) and "xlrelease.ScriptTask" not in str(item1.getType()):
+                    for item2 in item1.pythonScript.getInputProperties():
+                        if 'taskPassword' in str(item2):
+                            item1.pythonScript.setProperty('taskPassword', "${global.towerArtifactoryPassword}")
+                            isVariableUpdated = True
+                        elif 'password' in str(item2):
+                            item1.pythonScript.setProperty('password', "${nonprod_tower_deployer_password}")
+                            isVariableUpdated = True
+
+                if isVariableUpdated:
+                    taskApi.updateTask(item1)
+                    print(item1)
