@@ -1,0 +1,30 @@
+import re  # Ensure regex module is imported
+
+### Replace the script task variables
+if "xlrelease.ScriptTask" in str(item1.getType()):
+    scriptInTask = item1.script
+
+    # Replace standard release variables
+    if newVariablePattern not in scriptInTask and newValuePattern not in scriptInTask and eachVariableName in scriptInTask:
+        scriptInTask = scriptInTask.replace(releaseVariablePattern1, newVariablePattern)
+        scriptInTask = scriptInTask.replace(releaseVariablePattern2, newVariablePattern)
+        scriptInTask = scriptInTask.replace(releaseValuePattern, newValuePattern)
+        item1.script = scriptInTask
+        isVariableUpdated = True
+
+    # ✅ Ensure 'setVariable' exists before applying regex
+    if "setVariable(" in scriptInTask:
+        try:
+            # 🔹 Regex to match `setVariable('ANY_VALUE', SECOND_ARG)`
+            updatedScript = re.sub(
+                r"setVariable\s*\(\s*(['\"])(.*?)\1\s*,",  # Match first argument (inside quotes)
+                lambda m: f"setVariable({m.group(1)}{m.group(2)}_{key}{m.group(1)},",  # Append environment (`key`)
+                scriptInTask
+            )
+
+            if updatedScript != scriptInTask:
+                item1.script = updatedScript
+                isVariableUpdated = True
+        
+        except Exception as e:
+            print(f"Error while updating setVariable calls: {e}")  # Log error
