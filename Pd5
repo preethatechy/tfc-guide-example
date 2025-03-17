@@ -1,0 +1,49 @@
+import re
+
+for key, item in releaseVariables['grpDeployment Sequence_dev'].items():
+    deployTaskName = 'Deploy ' + '${' + 'artifactoryBuildName' + '}'
+    preDeployTaskName = "Execute Pre deploy tower job template"
+    postDeployTaskName = "Execute Post deploy tower job template"
+    createTemplateTaskName = "Create Tower Job Template"
+    taskReference = "Set Variables for Deployment Sequencing"
+    parallelDeployTaskName = 'ParallelDeploy ' + '${' + 'artifactoryBuildName' + '}'
+    containerid = ""
+    phaseTitle = getCurrentPhase().title
+
+    if key in phaseTitle and " (" in phaseTitle:
+        
+        phaseData = phaseTitle.split(" (")
+        if phaseData[0] == key:
+            containerid = taskApi.searchTasksByTitle(taskReference, phaseTitle, getCurrentRelease().id)[0].container
+        else:
+            containerid = taskApi.searchTasksByTitle(taskReference, key, getCurrentRelease().id)[0].container
+    else:
+        containerid = taskApi.searchTasksByTitle(taskReference, key, getCurrentRelease().id)[0].container
+
+    for item1 in containerid.getChildren():
+        print("For Environment", key, "associating vars in ", item1.title)
+        isVariableUpdated = False
+
+        # Check for Script Tasks and replace setVariable argument
+        if "xlrelease.ScriptTask" in str(item1.getType()):
+            scriptInTask = item1.script
+
+            # Match setVariable and extract the first argument (the variable name inside single quotes)
+            pattern = r"setVariable\('([^']+)','([^']+)'\)"
+            matches = re.finditer(pattern, scriptInTask)
+
+            for match in matches:
+                # Extract variable name and append the environment suffix
+                variable_name = match.group(1)
+                updated_variable_name = f"{variable_name}_{key}"  # Add environment-specific suffix
+
+                # Replace the old variable name with the new one (with environment suffix)
+                scriptInTask = scriptInTask.replace(match.group(1), updated_variable_name)
+
+            # Update the script with the modified content
+            item1.script = scriptInTask
+            isVariableUpdated = True
+
+        if isVariableUpdated:
+            taskApi.updateTask(item1)
+            print(item1)
