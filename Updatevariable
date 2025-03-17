@@ -1,0 +1,24 @@
+import re  # Ensure regex module is imported
+
+### Replace the script task variables
+if "xlrelease.ScriptTask" in str(item1.getType()):
+    scriptInTask = item1.script
+    
+    # Replace standard release variables
+    if newVariablePattern not in scriptInTask and newValuePattern not in scriptInTask and eachVariableName in scriptInTask:
+        scriptInTask = scriptInTask.replace(releaseVariablePattern1, newVariablePattern)
+        scriptInTask = scriptInTask.replace(releaseVariablePattern2, newVariablePattern)
+        scriptInTask = scriptInTask.replace(releaseValuePattern, newValuePattern)
+        item1.script = scriptInTask
+        isVariableUpdated = True
+
+    # NEW: Modify 'setVariable' calls to append environment
+    updatedScript = re.sub(
+        r"setVariable\(\s*'([^']+)'\s*,",  # Match 'setVariable' calls
+        lambda m: f"setVariable('{m.group(1)}_{key}',",  # Append environment (`key`)
+        scriptInTask
+    )
+
+    if updatedScript != scriptInTask:
+        item1.script = updatedScript
+        isVariableUpdated = True
