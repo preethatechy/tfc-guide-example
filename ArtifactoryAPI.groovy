@@ -1,5 +1,15 @@
 package org.hz.core.apis
+# List of keys to check in releaseVariables
+keys_to_check = ["a", "b", "c", "d", "e"]
 
+# Check for falsy values in specified keys
+if any(not releaseVariables[key] for key in keys_to_check if key in releaseVariables):
+    # Remove the key 'test' from towerDatastore if it exists
+    if 'test' in towerDatastore:
+        del towerDatastore['test']
+        print("Key 'test' removed from towerDatastore")
+else:
+    print("No falsy values found in specified keys. No action taken.")
 import groovyx.net.http.ContentType
 @Grab(group = 'org.codehaus.groovy.modules.http-builder', module = 'http-builder', version = '0.7.1')
 import org.hz.core.base.BaseApi
