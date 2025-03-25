@@ -1,3 +1,22 @@
+# Define the method to remove a key from the map
+def remove_key_from_map(dataMap, key_to_remove):
+    if key_to_remove in dataMap:
+        del dataMap[key_to_remove]
+        print("Key '{}' removed from the map.".format(key_to_remove))
+    else:
+        print("Key '{}' not found in the map.".format(key_to_remove))
+
+# Sample map
+towerDatastore = {"test": "value", "key1": "value1", "key2": "value2"}
+
+# Call the method wherever required
+remove_key_from_map(towerDatastore, "test")
+remove_key_from_map(towerDatastore, "key1")
+remove_key_from_map(towerDatastore, "non_existent_key")
+
+# Print updated map
+print(towerDatastore)
+
 package org.hz.core.apis
 # List of keys to check in releaseVariables
 keys_to_check = ["a", "b", "c", "d", "e"]
