@@ -89,3 +89,33 @@ DEV1 (first) | DataStoreNP | 12 | All endpoints new
 DEV2 (same cfg) | DataStoreNP | 0 | All endpoints reused
 DEV3 (post diff) | DataStoreNP | 4 | Only PostDeploy changed
 PROD1 (first) | DataStoreProd | 12 | Different store, treated as new
+
+
+
+ordered_envs = releaseVariables['release_environments'].split(",")
+
+for env in ordered_envs:
+    # Find environment in deploymentGroups
+    for group in deploymentGroups:
+        for compName in group:
+            if compName[0] == env:
+                tower_task_results = taskApi.searchTasksByTitle("Tower changes for the environment", env, current_release.id)
+                if tower_task_results:
+                    tower_task = tower_task_results[0]
+                    copied_tower_task = taskApi.copyTask(tower_task.id, tower_sequential_task.id, len(tower_sequential_task.getTasks()))
+                    copied_tower_task.title = "Tower changes for " + env
+                    taskApi.updateTask(copied_tower_task)
+
+                    # Update subtasks recursively
+                    if hasattr(copied_tower_task, 'getTasks'):
+                        for sub_task in copied_tower_task.getTasks():
+                            sub_task.title += " - " + env
+                            taskApi.updateTask(sub_task)
+
+                            if hasattr(sub_task, 'getTasks'):
+                                for nested_sub_task in sub_task.getTasks():
+                                    nested_sub_task.title += " - " + env
+                                    taskApi.updateTask(nested_sub_task)
+
+                    taskApi.delete(tower_task.id)
+
