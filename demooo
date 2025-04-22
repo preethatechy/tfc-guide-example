@@ -1,0 +1,91 @@
+XLR → Script Task (PrePostScript):
+Constructs endpoints for PreDeploy and PostDeploy:
+
+Pre Inventory, Credential, Vault, Template
+
+Post Inventory, Credential, Vault, Template
+
+Script Task → DataStoreNP:
+
+Checks if each of the 8 endpoints already exists
+
+Constructs only missing ones
+
+Script Task → Plugin (PrePostPlugin):
+
+Passes map of all 8 endpoints
+
+Plugin → Tower:
+
+Executes API calls only for the unresolved ones
+
+Caches the resolved Tower IDs back to DataStoreNP
+
+🔸 Phase 2: Deploy
+XLR → Script Task (DeployScript):
+
+Constructs endpoints for Deploy:
+
+Inventory, Credential, Vault, Template
+
+Script Task → DataStoreNP:
+
+Checks if Deploy-specific endpoints exist
+
+Constructs any that are missing
+
+Script Task → Plugin (DeployPlugin):
+
+Passes 4 deploy endpoints
+
+Plugin → Tower:
+
+Makes calls only for unresolved Deploy endpoints
+
+Saves results to DataStoreNP
+
+
+
+  Stage | Total Endpoints | Script Task Constructs | Plugin Calls (if cache miss)
+PreDeploy | 4 | 4 | 4
+PostDeploy | 4 | 4 | 4
+Deploy | 4 | 4 | 4
+Total | 12 | 12 | Up to 12
+
+
+  ✅ Scenario 1: First deployment to DEV1
+Pre/Post: 8 new endpoints
+
+Deploy: 4 new endpoints
+Total Tower API calls: 12
+All unique
+
+✅ Scenario 2: Second deployment to DEV2 (same config)
+Script task re-generates same endpoints
+
+All found in DataStoreNP
+Total Tower API calls: 0
+
+✅ Scenario 3: Third deployment to DEV3 (PostDeploy config changed)
+PreDeploy: 4 in cache → 0 calls
+
+PostDeploy: 4 changed → 4 new calls
+
+Deploy: 4 in cache → 0 calls
+Total Tower API calls: 4
+
+✅ Scenario 4: Deploy to PROD1 (same config as DEV1 but different phase type)
+Uses DataStoreProd
+
+Pre/Post: 8 endpoints (new in PROD)
+
+Deploy: 4 endpoints (new in PROD)
+Total Tower API calls: 12
+
+
+
+  Scenario | DataStore Used | API Calls | Reason
+DEV1 (first) | DataStoreNP | 12 | All endpoints new
+DEV2 (same cfg) | DataStoreNP | 0 | All endpoints reused
+DEV3 (post diff) | DataStoreNP | 4 | Only PostDeploy changed
+PROD1 (first) | DataStoreProd | 12 | Different store, treated as new
