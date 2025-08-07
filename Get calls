@@ -1,313 +1,122 @@
-import groovy.json.JsonSlurper
+from airflow import DAG
+from airflow.utils.dates import days_ago
+from airflow.decorators import task
+from airflow.operators.empty import EmptyOperator
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.operators.python import PythonOperator
+from airflow.triggers.date_time import DateTimeTrigger
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.operators.python import PythonVirtualenvOperator
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.operators.empty import EmptyOperator
+from airflow.operators.python import PythonOperator, BranchPythonOperator
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.operators.empty import EmptyOperator
+from airflow.operators.python import PythonOperator
+from airflow.operators.python import PythonOperator, BranchPythonOperator
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.operators.empty import EmptyOperator
+from airflow.operators.python import PythonOperator
+from airflow.operators.python import PythonOperator
+from airflow.triggers.date_time import DateTimeTrigger
+from airflow.operators.python import PythonOperator
+from airflow.operators.empty import EmptyOperator
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.operators.python import PythonOperator, BranchPythonOperator
+from airflow.operators.python import PythonOperator
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.operators.empty import EmptyOperator
+from airflow.operators.python import PythonOperator
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.operators.empty import EmptyOperator
+from airflow.operators.python import PythonOperator
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.operators.python import PythonOperator
+from airflow.operators.python import PythonOperator
+from airflow.operators.python import PythonOperator
+from airflow.operators.empty import EmptyOperator
+from airflow.operators.python import PythonOperator
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.operators.empty import EmptyOperator
+from airflow.operators.python import PythonOperator
+from airflow.operators.python import PythonOperator
+from airflow.operators.python import PythonOperator
+from airflow.operators.empty import EmptyOperator
+from airflow.operators.python import PythonOperator
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.operators.python import PythonOperator
+from airflow.operators.empty import EmptyOperator
+from airflow.triggers.date_time import DateTimeTrigger
+from airflow.operators.python import PythonOperator
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.operators.empty import EmptyOperator
+from airflow.operators.python import PythonOperator
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.operators.empty import EmptyOperator
+from airflow.operators.python import PythonOperator
+from airflow.operators.python import PythonOperator
+from airflow.operators.empty import EmptyOperator
+from airflow.triggers.date_time import DateTimeTrigger
+from airflow.operators.empty import EmptyOperator
+from airflow.operators.python import PythonOperator
+from airflow.decorators import dag
+from airflow.operators.python import PythonOperator
+from airflow.operators.empty import EmptyOperator
+from airflow.operators.python import PythonOperator
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.operators.empty import EmptyOperator
+from airflow.triggers.date_time import DateTimeTrigger
+from airflow.operators.python import PythonOperator
+from airflow.operators.empty import EmptyOperator
+from airflow.decorators import task
+from airflow.triggers.date_time import DateTimeTrigger
+from airflow.operators.empty import EmptyOperator
+from airflow.operators.python import PythonOperator
+from airflow.decorators import dag
+from airflow.triggers.date_time import DateTimeTrigger
+from airflow.utils.timezone import parse as parse_time
 
-def httpRequestHelper(config, method, url, headers = [], body = null, file = null) {
-    try {
-        def response = httpRequest(
-            customHeaders: headers,
-            httpMode: method,
-            requestBody: body,
-            uploadFile: file,
-            wrapAsMultipart: file ? false : null,
-            url: url
-        )
-        return response.content ? new JsonSlurper().parseText(response.content) : null
-    } catch (Exception e) {
-        printErrLog("${e.toString().contains('404') ? 'Resource not found' : 'Request failed'}: ${url}")
-        throw e
-    }
-}
+from datetime import datetime
+import pymongo
 
-def getHeaders(config, contentType = "application/vnd.api+json") {
-    return [
-        [name: "Authorization", value: "Bearer ${config.tfetoken}"],
-        [name: "Content-Type", value: contentType]
-    ]
-}
+def get_task_time_from_mongo():
+    # Replace with your MongoDB query logic
+    mongo_uri = "mongodb://yourhost:port"
+    client = pymongo.MongoClient(mongo_uri)
+    db = client["your_db"]
+    task = db.tasks.find_one({"status": "queued"})
+    scheduled_time = task["scheduled_time"]  # ISO format: "2025-08-07T15:45:00"
+    return scheduled_time
 
-def getWorkspaceId(config) {
-    validateOrgAndProvider(config)
-    def url = "${config.tfeurl}/api/v2/organizations/${config.tfeorganization}/workspaces/${config.tfeworkspace}"
-    return httpRequestHelper(config, 'GET', url, getHeaders(config)).data.id
-}
+with DAG(
+    dag_id="deferred_task_processor",
+    start_date=days_ago(1),
+    schedule_interval="@hourly",
+    catchup=False,
+    tags=["deferred", "mongodb"],
+) as dag:
 
-def def publishConfigurationStage(config) {
-    try {
-        def url = buildConfigurationStage(config)
-        httpRequestHelper(config, 'PUT', url, getHeaders(config, "application/octet-stream"), null, "${config.repo}.${config.env}.tar.gz")
-        logMetrics(config, "Config files successfully published")
-    } catch (Exception e) {
-        logMetrics(config, "Config file publish stage failed: ${e}", false)
-        printErrLog("Exception/Error: Publishing config files failed - ${e}")
-    }
-}
+    start = EmptyOperator(task_id="start")
 
-def validateOrgAndProvider(config) {
-    def url = "${config.tfeurl}/api/v2/organizations/${config.tfeorganization}/registry-providers/private/${config.tfeorganization}/${config.provider}"
-    httpRequestHelper(config, 'GET', url, getHeaders(config))
-}
-
-def buildConfigurationStage(config) {
-    def url = "${config.tfeurl}/api/v2/workspaces/${getWorkspaceId(config)}/configuration-versions"
-    def payload = '{"data":{"type":"configuration-versions","attributes":{"auto-queue-runs":false}}}'
-    return httpRequestHelper(config, 'POST', url, getHeaders(config), payload).data.attributes.'upload-url'
-}
-
-def logMetrics(config, message) {
-    pipelineUtil.logMetrics(config, pipelineConstants.stages.PUBLISHCONFIGFILES, config.stageTool, message, null, pipelineConstants.stageResults.success)
-}
-
-
-
-
-
-
-
-import groovy.json.JsonSlurper
-
-def httpRequestHelper(config, method, url, headers = [], body = null, file = null) {
-    try {
-        def response = httpRequest(
-            customHeaders: headers,
-            httpMode: method,
-            requestBody: body,
-            uploadFile: file,
-            wrapAsMultipart: file ? false : null,
-            url: url
-        )
-        return response.content ? new JsonSlurper().parseText(response.content) : null
-    } catch (Exception e) {
-        printErrLog("${e.toString().contains('404') ? 'Resource not found' : 'Request failed'}: ${url}")
-        throw e
-    }
-}
-
-def getHeaders(config, contentType = "application/vnd.api+json") {
-    return [
-        [name: "Authorization", value: "Bearer ${config.tfetoken}"],
-        [name: "Content-Type", value: contentType]
-    ]
-}
-
-def getWorkspaceId(config) {
-    validateOrgAndProvider(config)
-    def url = "${config.tfeurl}/api/v2/organizations/${config.tfeorganization}/workspaces/${config.tfeworkspace}"
-    return httpRequestHelper(config, 'GET', url, getHeaders(config)).data.id
-}
-
-def publishConfigurationStage(config) {
-    try {
-        def url = buildConfigurationStage(config)
-        httpRequestHelper(config, 'PUT', url, getHeaders(config, "application/octet-stream"), null, "${config.repo}.${config.env}.tar.gz")
-        logMetrics(config, "Config files successfully published")
-    } catch (Exception e) {
-        logMetrics(config, "Config file publish stage failed: ${e}", false)
-        printErrLog("Exception/Error: Publishing config files failed - ${e}")
-    }
-}
-def validateOrgAndProvider(config) {
-    def url = "${config.tfeurl}/api/v2/organizations/${config.tfeorganization}/registry-providers/private/${config.tfeorganization}/${config.provider}"
-    try {
-        httpRequestHelper(config, 'GET', url, getHeaders(config))
-        printLog("Organization and provider validated successfully")
-    } catch (IllegalStateException err) {
-        if (err.toString().contains("Fail: Status code 404 is not in the accepted range")) {
-            printErrLog("Verify whether you have specified correct TFE org, provider, or Token details")
-        }
-        throw err
-    } catch (Exception e) {
-        printErrLog("Exception occurred: ${e.toString()}")
-        throw e
-    }
-}
-
-
-
-def buildConfigurationStage(config) {
-    def url = "${config.tfeurl}/api/v2/workspaces/${getWorkspaceId(config)}/configuration-versions"
-    def payload = '{"data":{"type":"configuration-versions","attributes":{"auto-queue-runs":false}}}'
-    return httpRequestHelper(config, 'POST', url, getHeaders(config), payload).data.attributes.'upload-url'
-}
-
-def logMetrics(config, message, success = true) {
-    pipelineUtil.logMetrics(
-        config,
-        pipelineConstants.stages.PUBLISHCONFIGFILES,
-        config.stageTool,
-        message,
-        null,
-        success ? pipelineConstants.stageResults.success : pipelineConstants.stageResults.failure
+    get_scheduled_time = PythonOperator(
+        task_id="get_scheduled_time",
+        python_callable=get_task_time_from_mongo,
     )
-}
 
-import groovy.json.JsonSlurper
-
-// Centralized error messages for each method
-def errorMessages = [
-    "validateOrgAndProvider" : "Verify whether you have specified correct TFE org, provider, or Token details",
-    "getWorkspaceId" : "Verify whether you have specified the correct workspace name",
-    "buildConfigurationStage" : "Exception occurred while building configuration stage",
-    "publishConfigurationStage" : "Exception/Error: Publishing config files failed"
-]
-
-// Reusable HTTP Request function with error handling
-def httpRequestHelper(config, method, url, body = null, file = null, contentType = "application/vnd.api+json", methodName = "") {
-    def headers = [
-        [name: "Authorization", value: "Bearer ${config.tfetoken}"],
-        [name: "Content-Type", value: contentType]
-    ]
-    try {
-        def response = httpRequest(
-            customHeaders: headers,
-            httpMode: method,
-            requestBody: body,
-            uploadFile: file,
-            wrapAsMultipart: file ? false : null,
-            url: url
-        )
-        return response.content ? new JsonSlurper().parseText(response.content) : null
-    } catch (Exception e) {
-        def errMsg = errorMessages[methodName] ?: "Unknown error"
-        printErrLog("${errMsg}: ${e.toString()}")
-        throw e
-    }
-}
-
-// Method to validate Org and Provider
-def validateOrgAndProvider(config) {
-    def url = "${config.tfeurl}/api/v2/organizations/${config.tfeorganization}/registry-providers/private/${config.tfeorganization}/${config.provider}"
-    httpRequestHelper(config, 'GET', url, null, null, "application/vnd.api+json", "validateOrgAndProvider")
-}
-
-// Method to get Workspace ID
-def getWorkspaceId(config) {
-    validateOrgAndProvider(config)  // Ensure Org and Provider are validated first
-    def url = "${config.tfeurl}/api/v2/organizations/${config.tfeorganization}/workspaces/${config.tfeworkspace}"
-    return httpRequestHelper(config, 'GET', url, null, null, "application/vnd.api+json", "getWorkspaceId").data.id
-}
-
-// Method to build Configuration Stage
-def buildConfigurationStage(config) {
-    def workspaceId = getWorkspaceId(config)  // Get workspace ID
-    def url = "${config.tfeurl}/api/v2/workspaces/${workspaceId}/configuration-versions"
-    def payload = '{"data":{"type":"configuration-versions","attributes":{"auto-queue-runs":false}}}'
-    return httpRequestHelper(config, 'POST', url, payload, null, "application/vnd.api+json", "buildConfigurationStage").data.attributes.'upload-url'
-}
-
-// Method to publish Configuration Stage
-def publishConfigurationStage(config) {
-    try {
-        def url = buildConfigurationStage(config)  // Get the upload URL
-        httpRequestHelper(config, 'PUT', url, null, "${config.repo}.${config.env}.tar.gz", "application/octet-stream", "publishConfigurationStage")
-        logMetrics(config, "Config files successfully published")
-    } catch (Exception e) {
-        logMetrics(config, "Config file publish stage failed: ${e}", false)
-        printErrLog("Exception/Error: Publishing config files failed - ${e}")
-    }
-}
-
-// Logging metrics for pipeline
-def logMetrics(config, message, success = true) {
-    pipelineUtil.logMetrics(
-        config,
-        pipelineConstants.stages.PUBLISHCONFIGFILES,
-        config.stageTool,
-        message,
-        null,
-        success ? pipelineConstants.stageResults.success : pipelineConstants.stageResults.failure
+    wait_until_time = EmptyOperator(
+        task_id="wait_until_scheduled_time",
+        trigger_rule="all_done",
+        deferrable=True,
+        trigger=DateTimeTrigger(
+            moment=parse_time(get_task_time_from_mongo())
+        ),
     )
-}
 
-// Helper function for logging error messages
-def printErrLog(message) {
-    println "[ERROR] ${message}"
-}
-
-
-
-import groovy.json.JsonSlurper
-
-// Define error messages map globally
-def errorMessages = [
-    "validateOrgAndProvider" : "Verify whether you have specified correct TFE org, provider, or Token details",
-    "getWorkspaceId" : "Verify whether you have specified the correct workspace name",
-    "buildConfigurationStage" : "Exception occurred while building configuration stage",
-    "publishConfigurationStage" : "Exception/Error: Publishing config files failed"
-]
-
-// Reusable HTTP Request function with error handling
-def httpRequestHelper(config, method, url, body = null, file = null, contentType = "application/vnd.api+json", methodName = "") {
-    def params = [
-        customHeaders: [
-            [name: "Authorization", value: "Bearer ${config.tfetoken}"],
-            [name: "Content-Type", value: contentType]
-        ],
-        httpMode: method,
-        url: url
-    ]
-
-    // Only add body or file if they are provided
-    if (body) params.requestBody = body
-    if (file) {
-        params.uploadFile = file
-        params.wrapAsMultipart = false  // Disable multipart wrapping for file uploads
-    }
-
-    try {
-        def response = httpRequest(params)
-        return response.content ? new JsonSlurper().parseText(response.content) : null
-    } catch (Exception e) {
-        printErrLog("${errorMessages[methodName] ?: 'Unknown error'}: ${e.toString()}")
-        throw e
-    }
-}
-
-// Helper function for logging error messages
-def printErrLog(message) {
-    println "[ERROR] ${message}"
-}
-
-// Method to validate Org and Provider
-def validateOrgAndProvider(config) {
-    def url = "${config.tfeurl}/api/v2/organizations/${config.tfeorganization}/registry-providers/private/${config.tfeorganization}/${config.provider}"
-    httpRequestHelper(config, 'GET', url, "", "", "application/vnd.api+json", "validateOrgAndProvider")
-}
-
-// Method to get Workspace ID
-def getWorkspaceId(config) {
-    validateOrgAndProvider(config)
-    def url = "${config.tfeurl}/api/v2/organizations/${config.tfeorganization}/workspaces/${config.tfeworkspace}"
-    return httpRequestHelper(config, 'GET', url, "", "", "application/vnd.api+json", "getWorkspaceId").data.id
-}
-
-// Method to build Configuration Stage
-def buildConfigurationStage(config) {
-    def workspaceId = getWorkspaceId(config)
-    def url = "${config.tfeurl}/api/v2/workspaces/${workspaceId}/configuration-versions"
-    def payload = '{"data":{"type":"configuration-versions","attributes":{"auto-queue-runs":false}}}'
-    return httpRequestHelper(config, 'POST', url, payload, "", "application/vnd.api+json", "buildConfigurationStage").data.attributes.'upload-url'
-}
-
-// Method to publish Configuration Stage
-def publishConfigurationStage(config) {
-    try {
-        httpRequestHelper(config, 'PUT', buildConfigurationStage(config), "", "${config.repo}.${config.env}.tar.gz", "application/octet-stream", "publishConfigurationStage")
-        logMetrics(config, "Config files successfully published")
-    } catch (Exception e) {
-        logMetrics(config, "Config file publish stage failed: ${e}", false)
-        printErrLog("Exception/Error: Publishing config files failed - ${e}")
-    }
-}
-
-// Logging metrics for pipeline
-def logMetrics(config, message, success = true) {
-    pipelineUtil.logMetrics(
-        config,
-        pipelineConstants.stages.PUBLISHCONFIGFILES,
-        config.stageTool,
-        message,
-        null,
-        success ? pipelineConstants.stageResults.success : pipelineConstants.stageResults.failure
+    process_task = PythonOperator(
+        task_id="process_task",
+        python_callable=lambda: print("Task executed at scheduled time"),
     )
-}
 
+    end = EmptyOperator(task_id="end")
 
+    start >> get_scheduled_time >> wait_until_time >> process_task >> end
