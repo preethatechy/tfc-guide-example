@@ -120,3 +120,75 @@ with DAG(
     end = EmptyOperator(task_id="end")
 
     start >> get_scheduled_time >> wait_until_time >> process_task >> end
+
+
+
+
+
+# my_triggers.py
+from airflow.triggers.base import BaseTrigger, TriggerEvent
+import asyncio
+from datetime import datetime
+
+class WaitUntilTimeTrigger(BaseTrigger):
+    def __init__(self, run_at_iso: str):
+        super().__init__()
+        self.run_at = datetime.fromisoformat(run_at_iso)
+
+    def serialize(self):
+        return (
+            "my_triggers.WaitUntilTimeTrigger",
+            {"run_at_iso": self.run_at.isoformat()},
+        )
+
+    async def run(self):
+        while datetime.now() < self.run_at:
+            await asyncio.sleep(10)  # Non-blocking sleep
+        yield TriggerEvent({"message": "Time reached!"})
+
+
+
+
+
+
+
+# dags/my_dag.py
+from airflow import DAG
+from airflow.operators.empty import EmptyOperator
+from airflow.sensors.base import BaseSensorOperator
+from my_triggers import WaitUntilTimeTrigger
+from datetime import datetime, timedelta
+from airflow.utils.dates import days_ago
+
+class DeferrableTimeSensor(BaseSensorOperator):
+    def __init__(self, scheduled_time, **kwargs):
+        super().__init__(**kwargs)
+        self.scheduled_time = scheduled_time
+
+    def poke(self, context):
+        return False  # Never poke, only defer
+
+    def execute(self, context):
+        self.defer(trigger=WaitUntilTimeTrigger(self.scheduled_time), method_name="execute_complete")
+
+    def execute_complete(self, context, event=None):
+        print("Deferred until:", self.scheduled_time)
+        return "Resumed at scheduled time"
+
+with DAG(
+    dag_id="custom_trigger_mongo_wait",
+    start_date=days_ago(1),
+    schedule_interval=None,
+    catchup=False,
+) as dag:
+
+    start = EmptyOperator(task_id="start")
+
+    wait = DeferrableTimeSensor(
+        task_id="wait_until_scheduled_time",
+        scheduled_time="2025-08-07T18:30:00",  # You can dynamically pass from MongoDB
+    )
+
+    done = EmptyOperator(task_id="done")
+
+    start >> wait >> done
