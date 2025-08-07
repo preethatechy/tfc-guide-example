@@ -1,3 +1,34 @@
+
+
+query = {
+    "status": "queued",
+    "$or": [
+        {
+            "task_type": "scheduler",
+            "schedule_time": {"$gte": current_time}
+        },
+        {
+            "task_type": {"$ne": "scheduler"}
+        }
+    ]
+}
+
+for task in collection.find({"schedule_time": {"$exists": True}}).limit(5):
+    schedule_time = task["schedule_time"]
+    print("Value:", schedule_time)
+    print("Type:", type(schedule_time))
+
+
+
+from dateutil import parser
+
+for task in collection.find({"schedule_time": {"$exists": True}}).limit(5):
+    if isinstance(task["schedule_time"], str):
+        dt = parser.isoparse(task["schedule_time"])
+        print("Parsed datetime:", dt)
+
+
+
 from airflow import DAG
 from airflow.utils.dates import days_ago
 from airflow.decorators import task
